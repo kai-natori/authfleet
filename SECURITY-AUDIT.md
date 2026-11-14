@@ -1,0 +1,336 @@
+# AuthFleet — Security Audit
+
+- **Scope:** initial commit `d97960b` ("AuthFleet v1 foundation")
+- **Date:** 2026-11-15
+- **Method:** static code audit of `apps/api`, `apps/web`, `packages/core`,
+  wrangler configs, migrations, and tracked-file secrets scan. No live runs,
+  no deploys. Existing test suites re-run: **core 17/17 passed, api 11/11
+  passed** (apps/web has no test files — see coverage note in §5).
+- **Asset under protection:** the registry D1 stores AES-GCM-encrypted
+  Cloudflare API tokens for the operator's other projects. Compromise of
+  the api's trust boundary = compromise of every registered token.
+
+## Summary
+
+| Severity | Count |
+| -------- | ----- |
+| Critical | 0 |
+| High     | 1 |
+| Medium   | 2 |
+| Low      | 5 |
+
+The cryptography, the response-shape discipline (tokens never leave the
+api), the target-D1 SQL construction, and the api's network exposure
+config are all sound. The weaknesses concentrate where the design said
+they would be watched: **the operator-identity chain (Access header →
+web → api gate) is trusted, not verified**, and the shipped web config
+does not by itself guarantee that every path to the web Worker passes
+through Cloudflare Access.
+
+---
+
+## Findings
+
+### F1 — HIGH: Web trusts the Access email header with no JWT validation, and web does not disable workers.dev
+
+**Evidence**
+
+- `apps/web/src/server/api.ts:45` — the operator identity is taken
+  verbatim from the inbound request header and forwarded to the api:
+  ```ts
+  const fromAccess = request?.headers.get("cf-access-authenticated-user-email");
+  if (fromAccess) return fromAccess;
+  ```
+  There is no validation of `Cf-Access-Jwt-Assertion` anywhere in the
+  codebase (grep for `jwt` / `cf-access` across `apps/web/src`,
+  `apps/api/src`, `apps/web/worker.mjs` returns only the line above).
+- `apps/api/src/app.ts:73-86` — the api accepts **any** non-empty
+  `x-authfleet-operator` value (see also F2), so a forged email header
+  at web is sufficient for full registry admin: list/create/delete
+  projects, read every project's user statistics, trigger snapshots.
+- `apps/web/wrangler.jsonc` sets **no** `workers_dev` key, so the
+  `*.workers.dev` hostname stays enabled by default. That hostname is
+  not covered by a Cloudflare Access application created for the custom
+  domain (the setup the README prescribes). On any path that does not
+  traverse Access — workers.dev, or a future route added outside the
+  Access application — Cloudflare does not inject the header, and a
+  remote unauthenticated client can simply set
+  `Cf-Access-Authenticated-User-Email: anyone@example.com` itself.
+  Web will believe it.
+
+The design doc's claim that the header "cannot be spoofed by a browser"
+is true **only** when 100% of traffic to the web Worker traverses
+Access. The shipped configuration does not guarantee that invariant;
+the code does not check it either.
+
+**Fix**
+
+1. Set `"workers_dev": false` in `apps/web/wrangler.jsonc` (mirror the
+   api) and document that web must only be reachable on Access-covered
+   hostnames.
+2. Defence in depth in web: verify `Cf-Access-Jwt-Assertion` against the
+   Access team's JWKS, checking audience (AUD) and expiry, and derive
+   the email from the verified JWT — never from the plain header. Fail
+   closed when the JWT is absent and the dev bypass is off.
+
+### F2 — MEDIUM: Api operator gate is presence-only; no allowlist, no format check
+
+**Evidence** — `apps/api/src/app.ts:73-86`:
+
+```ts
+const operator = c.req.header("x-authfleet-operator");
+if (operator) { c.set("operator", operator); return next(); }
+```
+
+Any non-empty string (`"x"`, `"not-an-email"`) passes. The gate proves
+only "the caller could set a header", which behind the service binding
+means "the caller is web". All authorisation strength is delegated to
+(a) the binding's network position and (b) web's honesty, plus (c) the
+Access policy in front of web. If that Access policy ever admits more
+than the owner (a team or whole-domain allow rule is one dashboard edit
+away), **every** admitted user receives full admin over the crown-jewels
+registry — there is no second check anywhere.
+
+**Fix** — add an api-side allowlist: an `AUTHFLEET_OPERATOR_EMAILS`
+secret/var; the gate rejects operators not on it (and non-email-shaped
+values). This is a few lines and converts the Access policy from a
+single point of failure into one layer of two.
+
+### F3 — MEDIUM: Upstream Cloudflare error details are returned to the caller
+
+**Evidence**
+
+- `packages/core/src/d1-reader.ts` (`query()`, ~lines 76-84) builds
+  `D1ReadError` messages from the Cloudflare API's own error payload:
+  `D1 query failed (${first.code}): ${first.message}`.
+- `apps/api/src/app.ts:174` and `:202` return `cause.message` verbatim
+  in the 502 body for the stats and snapshot endpoints; `apps/web`
+  (`callApi`) re-throws `body.error`, surfacing it in the dashboard UI.
+
+Today the only caller is the operator, so impact is modest — but the
+messages disclose target-account internals (database/table existence,
+CF error codes), and **combined with F1 they become available to an
+unauthenticated attacker**, turning the stats endpoint into an oracle
+for probing registered projects' Cloudflare accounts.
+
+**Fix** — return a generic error (`"failed to read project stats"`)
+to the client; log the detailed cause server-side only.
+
+### F4 — LOW: Project config values are interpolated unencoded into the Cloudflare API URL, with format-free validation
+
+**Evidence**
+
+- `apps/api/src/app.ts:46-47, 53-54` — `cfAccountId` and `d1DatabaseId`
+  are validated only as strings of length 1-64.
+- `packages/core/src/d1-reader.ts:51`:
+  ```ts
+  const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
+  ```
+
+Values containing `/`, `..`, `?`, or `#` reshape the request path.
+Scheme and host are hard-coded, so this is **not** general SSRF; the
+practical impact is bounded by the stored token's own Cloudflare scope.
+It is still an unnecessary hole in the one component that handles every
+project's credentials: the project's Bearer token is sent to whatever
+path the values produce under `api.cloudflare.com`.
+
+**Fix** — validate formats in the zod schemas (account ID: 32 hex
+chars; database ID: UUID shape) and `encodeURIComponent` both segments
+when building the URL.
+
+### F5 — LOW: AES-GCM ciphertexts are not bound to their project (no AAD)
+
+**Evidence** — `packages/core/src/crypto.ts:49`:
+`crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded)` — no
+`additionalData`. Anyone who gains **write** access to the registry D1
+(already a serious compromise) can transplant one row's
+ciphertext+IV into another project row, causing the api to present
+project A's token against project B's database — cross-project token
+use and stats confusion that the encryption will happily authenticate.
+
+**Fix** — pass the project id (or accountId+databaseId) as
+`additionalData` on encrypt/decrypt. Requires carrying the id through
+`encryptText`/`decryptText` call sites; do it before real tokens are
+stored, since it is a format change. While there, have `decryptText`
+reject IVs that are not 12 bytes (WebCrypto otherwise accepts other
+lengths).
+
+### F6 — LOW: "SELECT-only" toward target databases is caller discipline, not enforcement
+
+**Evidence** — `packages/core/src/d1-reader.ts:50`: `query(sql, params)`
+is a public method that sends any SQL string to the target D1 with the
+project's token. All current internal call sites pass SELECTs (verified
+— see §4), so the read-only property rests on (a) no future caller
+misusing `query()`, and (b) operators actually creating read-only
+tokens, which nothing enforces or verifies.
+
+**Fix** — enforce inside `query()`: reject anything that is not a
+single statement starting with `SELECT` (after trimming/comments).
+Document in the registration UI/README that the token must be created
+with the D1 **Read** permission only.
+
+### F7 — LOW: Brittle production config around the dev bypass and the local API URL
+
+**Evidence**
+
+- `apps/api/wrangler.jsonc` commits `"AUTHFLEET_DEV_BYPASS": "0"` —
+  safe as committed, but the bypass branch (`apps/api/src/app.ts:79`)
+  activates on the exact string `"1"`, and
+  `apps/api/.dev.vars.example` (the file operators copy from) sets
+  `AUTHFLEET_DEV_BYPASS=1`. Copying those values into production
+  secrets — a plausible operator error — silently opens the bypass.
+- `apps/web/wrangler.jsonc` ships `"AUTHFLEET_API_URL":
+  "http://127.0.0.1:8788"` in production vars. If the service binding
+  is ever missing/misnamed, web's server functions fall back to HTTP
+  against loopback instead of failing loudly at startup. (In Workers
+  this fetch fails, so it fails closed in practice — but it masks
+  misconfiguration.)
+
+**Fix** — keep bypass/demo flags out of committed production vars
+entirely (absence = off is already the code's behaviour); remove
+`AUTHFLEET_API_URL` from web's production `vars` so a missing binding
+is an obvious deployment error, not a silent fallback.
+
+### F8 — LOW (informational): Operator identity is echoed back in API responses
+
+**Evidence** — `apps/api/src/app.ts` (`GET /api/projects`) includes
+`operator: c.get("operator")` in the response body, and the dashboard
+renders it. It is React-escaped in the UI (no XSS — see §4), but
+reflecting an attacker-controllable header value (see F1) into
+responses is needless surface. Drop the field, or keep it only as a
+display of the *verified* identity once F1's JWT check exists.
+
+---
+
+## Checked and clean
+
+**Crypto (`packages/core/src/crypto.ts`, `ids.ts`)**
+
+- AES-256-GCM via WebCrypto; key import enforces exactly 32 bytes and
+  creates a **non-extractable** key limited to encrypt/decrypt
+  (lines 36-42).
+- Fresh 96-bit IV from `crypto.getRandomValues` on **every** encryption
+  (line 47) — no reuse; covered by the "random IV per record" test.
+- Wrong-key decryption fails (GCM tag) — covered by test.
+- `generateRandomToken` (line 66-69) is 32 bytes of CSPRNG output,
+  base64url — correctly designed for access-granting values. It is
+  currently exported-but-unused by production paths; nothing
+  secret-bearing uses a ULID instead.
+- ULIDs (`newId()`) are used **only** for registry row IDs (projects,
+  snapshots) — verified across `apps/api/src/db/repo.ts` and core.
+  The demo project's constant id `"demo"` carries empty ciphertext and
+  is fenced off from the reader, snapshot, PATCH and DELETE paths in
+  `apps/api/src/app.ts`.
+
+**Token exposure discipline**
+
+- `toPublicProject` (`packages/core/src/types.ts`) strips ciphertext
+  and IV; the api only ever exposes `tokenHint` (last 4 chars).
+- The api test suite asserts the plaintext token appears neither in
+  the create response nor in the stored ciphertext.
+- The decrypted token exists only in memory in `readerFor()` /
+  the cron path and is sent only as an `Authorization: Bearer` header
+  to `https://api.cloudflare.com` (hard-coded scheme+host in
+  `d1-reader.ts:51` — no SSRF surface via config).
+- The only logging in the codebase is the cron failure line
+  (`apps/api/src/index.ts:74`): project **name** + error message. No
+  token, ciphertext, or key material is logged anywhere (repo-wide
+  `console.*` grep).
+
+**Target-D1 SQL construction (`d1-reader.ts`)**
+
+- Table name comes from a `sqlite_master` lookup constrained to the
+  allowlist `user` / `users`; the anonymous-flag column from a constant
+  allowlist (`is_anonymous`, `isAnonymous`, `is_anon`); the created-at
+  column from two hard-coded literals; the epoch divisor is computed
+  internally (1 or 1000); the cutoff value is a **bound parameter**.
+  No project-config value reaches the SQL text. (The URL path is the
+  exception — F4.)
+
+**Registry data layer (`apps/api/src/db/repo.ts`, schema, migration)**
+
+- All Drizzle queries are parameterised (`eq`, `and`); no string-built
+  SQL. `deleteProject` removes snapshots explicitly and the migration
+  also declares `ON DELETE cascade` with a unique
+  `(project_id, date)` index backing the snapshot upsert.
+
+**Exposure & config**
+
+- `apps/api/wrangler.jsonc`: `workers_dev: false`, **no routes**
+  (verified), cron trigger only. `/health` is unauthenticated but
+  returns only `{ ok, service }`.
+- No CORS middleware anywhere on the api; web server functions are
+  same-origin.
+- Dev bypass fails **closed** in web when no Access header exists and
+  the bypass is unset: `operatorEmail()` returns `undefined`, the
+  header is omitted, and the api answers 401 (gate behaviour covered
+  by api tests).
+- `apps/web/worker.mjs` applies `X-Frame-Options: DENY`,
+  `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, and
+  `X-Content-Type-Options: nosniff` to every response.
+- Snapshot cron has no inbound auth surface (Cloudflare scheduled
+  invocation only), isolates per-project failures, and logs no secrets.
+
+**XSS / rendering**
+
+- All dashboard output (project names, operator, stats) renders through
+  React JSX with default escaping; repo-wide grep finds no
+  `dangerouslySetInnerHTML`, `innerHTML`, or `eval`.
+
+**Secrets hygiene (tracked files)**
+
+- `git grep` scan for secret-shaped assignments across tracked files:
+  clean. No `.dev.vars`, `.env`, `dist/`, or `.turbo/` files are
+  tracked; `.gitignore` covers them with `!.dev.vars.example` /
+  `!.env.example` exceptions only, and the example file contains
+  placeholders. Dependency set is small and current-looking
+  (hono ^4.13, drizzle-orm ^0.45, zod ^4.6, ulid ^3) — see the
+  unverified note on CVE status in §5.
+
+---
+
+## Unverified leads (not findings)
+
+1. **CSRF on web's state-changing server functions**
+   (create/delete/snapshot POSTs in `apps/web/src/server/api.ts`).
+   No explicit Origin/CSRF check exists in the code. Real protection
+   depends on TanStack Start's server-function transport behaviour and
+   the `SameSite` attributes of the Cloudflare Access session cookie
+   at runtime — not statically verifiable. Recommend a runtime check
+   on the operator's machine (cross-site POST attempt while signed in).
+2. **Actual deployment state vs. F1** — whether the deployed web
+   Worker is in fact reachable via workers.dev, and whether Cloudflare
+   strips client-supplied `Cf-Access-*` headers on every route, is a
+   deployment fact this static audit cannot settle. F1 is written
+   against the shipped config, which does not close the path.
+3. **Workers Logs content** — `observability.enabled: true` on both
+   Workers. Default invocation logs do not include request headers or
+   bodies, but this was not verified against a live deployment; if
+   header logging is ever enabled, the Access email and operator
+   header become log data.
+4. **Cron log detail** — `apps/api/src/index.ts:74` logs the snapshot
+   error message, which originates from the Cloudflare D1 API. Whether
+   some CF error messages embed SQL fragments could not be confirmed
+   without live calls. No credential material is involved either way.
+5. **Dependency CVEs** — `pnpm audit` could not be run in the audit
+   environment (pnpm unavailable); dependency versions look current
+   but their vulnerability status is unverified.
+6. **Test coverage gap (web)** — `apps/web` has **zero** test files.
+   The most security-sensitive web logic — Access-header reading and
+   operator forwarding in `src/server/api.ts` — has no automated
+   coverage; the api gate and crypto/reader logic are covered
+   (11 + 17 tests, all passing).
+
+---
+
+## Recommended order of work
+
+1. **F1** (web `workers_dev: false` now; Access JWT validation next) —
+   this is the only finding that can expose the registry to the
+   internet unauthenticated.
+2. **F2** (api-side operator allowlist) — cheap, removes the
+   single-point-of-failure in the Access policy.
+3. **F3 + F4** (generic errors; ID format validation + URL encoding).
+4. **F5** before any real production tokens are stored (AAD is a
+   ciphertext-format change; free now, a migration later).
+5. F6-F8 as hardening when convenient.
