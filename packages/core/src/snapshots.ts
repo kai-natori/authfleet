@@ -1,3 +1,4 @@
+import { D1ReadError } from "./d1-reader";
 import { dateString } from "./stats";
 import type { ProjectRecord, ProjectRepository } from "./types";
 
@@ -40,7 +41,14 @@ export async function runSnapshotJob(deps: SnapshotJobDeps): Promise<SnapshotJob
         projectId: project.id,
         projectName: project.name,
         ok: false,
-        error: cause instanceof Error ? cause.message : String(cause),
+        // Server-side only (cron logs): include the upstream detail so
+        // operators can diagnose; this string never reaches clients.
+        error:
+          cause instanceof D1ReadError && cause.detail
+            ? `${cause.message} ${cause.detail}`
+            : cause instanceof Error
+              ? cause.message
+              : String(cause),
       });
     }
   }

@@ -70,21 +70,39 @@ The only network path to api is the **service binding** declared in
 internet and cannot be made by anyone who does not control a Worker in
 the same account bound to api.
 
-Defence in depth on top of the binding:
+Defence in depth on top of the binding (hardened per the 2026-11-15
+security audit, findings F1/F2/F8):
 
+- Web also sets `workers_dev: false`: it is reachable only on the
+  custom domain the Access application covers, so every path to the
+  web Worker traverses Access.
 - Web's server-side client forwards the operator identity on every
-  binding call as `x-authfleet-operator: <email>`, taken from the
-  `Cf-Access-Authenticated-User-Email` header that Cloudflare Access
-  injects in front of web (so it cannot be spoofed by a browser — Access
-  strips/replaces it at the edge).
-- Api middleware requires that header on every route except `/health`
-  (which returns no data). Missing operator → `401`. Api never trusts
-  identity headers from anywhere else because there is no other route in.
+  binding call as `x-authfleet-operator: <email>`. The email comes from
+  the **verified** Cloudflare Access JWT (`Cf-Access-Jwt-Assertion`):
+  web checks the RS256 signature against the team JWKS, the audience
+  (AUD) and expiry before trusting any claim (`apps/web/src/server/
+  access.ts`). The plain `Cf-Access-Authenticated-User-Email` header is
+  never trusted — it is spoofable on any path that reaches the Worker
+  without traversing Access. Configuration is
+  `AUTHFLEET_ACCESS_TEAM_DOMAIN` + `AUTHFLEET_ACCESS_AUD` on web; when
+  either is set, both are required and a missing/invalid JWT fails
+  closed. When neither is set (local dev only), no header identity is
+  accepted at all.
+- Api middleware requires the operator header on every route except
+  `/health` (which returns no data). Missing → `401`; non-email-shaped
+  → `401`; when `AUTHFLEET_OPERATOR_EMAILS` is configured, an operator
+  outside the allowlist → `403` (this converts the Access policy from a
+  single point of failure into one layer of two). Api never trusts
+  identity headers from anywhere else because there is no other route
+  in, and it does not echo the operator identity in responses — web
+  displays the identity from its own verified JWT.
 - **Dev bypass**: when `AUTHFLEET_DEV_BYPASS=1` (local `.dev.vars` only),
-  api accepts `x-authfleet-operator` as-is / falls back to
-  `AUTHFLEET_DEV_OPERATOR` (default `dev@local`), and web's client sends
-  the same fallback when no Access header exists. This flag must never
-  be set in production; README and `.dev.vars.example` say so.
+  api falls back to `AUTHFLEET_DEV_OPERATOR` (default `dev@local`), and
+  web's client sends the same fallback when no Access configuration
+  exists. The bypass is inert whenever Access verification is
+  configured. This flag must never be set in production; README and
+  `.dev.vars.example` say so, and neither Worker's committed wrangler
+  config carries the flag at all (absence = off).
 
 Local dev exception: in local development, web calls api over HTTP
 (`AUTHFLEET_API_URL`, default `http://127.0.0.1:8788`) because both run
@@ -108,7 +126,23 @@ own.
   any token AuthFleet itself generates uses `crypto.getRandomValues`
   (≥32 bytes). Encryption: AES-GCM with a 256-bit key from the
   `TOKEN_ENCRYPTION_KEY` Worker secret (base64), random 96-bit IV per
-  record, IV stored beside the ciphertext.
+  record, IV stored beside the ciphertext. The ciphertext is bound to
+  its row via AAD — `authfleet:project-token:v1:<projectId>` — so a
+  transplanted ciphertext does not decrypt under another project
+  (audit F5); decryption rejects IVs that are not 12 bytes. The project
+  id is therefore generated before encryption at creation time.
+
+## Decision: error surface
+
+Api endpoints that read a target project (stats, snapshot) return a
+generic error (`failed to read project stats`) when the upstream
+Cloudflare call fails; the detailed cause (Cloudflare error codes and
+messages, kept in `D1ReadError.detail`) is written to server-side logs
+only (audit F3). Target-project config values are format-validated at
+creation (account id: 32 hex chars; database id: UUID) and
+URL-encoded when the Cloudflare API URL is built (audit F4). Core's
+reader enforces single-statement SELECT-only queries internally
+(audit F6), so read-only behaviour does not rest on caller discipline.
 
 ## Decision: snapshots in api's scheduled handler
 

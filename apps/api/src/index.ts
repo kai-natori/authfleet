@@ -1,4 +1,10 @@
-import { decryptText, importEncryptionKey, RemoteD1Reader, runSnapshotJob } from "@authfleet/core";
+import {
+  decryptText,
+  importEncryptionKey,
+  projectTokenAad,
+  RemoteD1Reader,
+  runSnapshotJob,
+} from "@authfleet/core";
 import { drizzle } from "drizzle-orm/d1";
 import { type AppDeps, createApp } from "./app";
 import { DrizzleProjectRepository } from "./db/repo";
@@ -19,11 +25,29 @@ export interface Env {
   /** Local dev only. Never set in production. */
   AUTHFLEET_DEV_BYPASS?: string;
   AUTHFLEET_DEV_OPERATOR?: string;
+  /**
+   * Comma-separated operator allowlist (audit F2). Set this in
+   * production: when present, only these emails may call the api.
+   */
+  AUTHFLEET_OPERATOR_EMAILS?: string;
 }
+
+let warnedAboutAllowlist = false;
 
 function buildDeps(env: Env): AppDeps {
   let keyPromise: Promise<CryptoKey> | null = null;
   const repo = new DrizzleProjectRepository(drizzle(env.DB, { schema }));
+  const operatorEmails = env.AUTHFLEET_OPERATOR_EMAILS?.split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter((e) => e.length > 0);
+  if ((!operatorEmails || operatorEmails.length === 0) && env.AUTHFLEET_DEV_BYPASS !== "1") {
+    if (!warnedAboutAllowlist) {
+      warnedAboutAllowlist = true;
+      console.warn(
+        "AUTHFLEET_OPERATOR_EMAILS is not set: the api accepts any email-shaped operator identity forwarded by web. Set it in production (audit F2).",
+      );
+    }
+  }
   return {
     repo,
     getEncryptionKey: () => {
@@ -38,6 +62,7 @@ function buildDeps(env: Env): AppDeps {
     demoEnabled: env.AUTHFLEET_DEMO === "1",
     devBypass: env.AUTHFLEET_DEV_BYPASS === "1",
     devOperator: env.AUTHFLEET_DEV_OPERATOR ?? "dev@local",
+    operatorEmails,
   };
 }
 
@@ -55,10 +80,14 @@ export default {
       repo,
       readerFor: (project) => ({
         getTotalUsers: async () => {
-          const token = await decryptText(key, {
-            ciphertext: project.tokenCiphertext,
-            iv: project.tokenIv,
-          });
+          const token = await decryptText(
+            key,
+            {
+              ciphertext: project.tokenCiphertext,
+              iv: project.tokenIv,
+            },
+            projectTokenAad(project.id),
+          );
           const reader = new RemoteD1Reader({
             accountId: project.cfAccountId,
             databaseId: project.d1DatabaseId,

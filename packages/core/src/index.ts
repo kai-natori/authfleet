@@ -4,9 +4,15 @@ export {
   encryptText,
   generateRandomToken,
   importEncryptionKey,
+  projectTokenAad,
   tokenHint,
 } from "./crypto";
-export { D1ReadError, RemoteD1Reader, type RemoteD1ReaderOptions } from "./d1-reader";
+export {
+  assertReadOnlyQuery,
+  D1ReadError,
+  RemoteD1Reader,
+  type RemoteD1ReaderOptions,
+} from "./d1-reader";
 export {
   DEMO_DAYS,
   DEMO_PROJECT_ID,

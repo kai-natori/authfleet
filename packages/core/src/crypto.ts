@@ -4,7 +4,9 @@
  * AES-GCM via WebCrypto (available in Workers and modern Node).
  * The key comes from the TOKEN_ENCRYPTION_KEY Worker secret (base64,
  * 32 bytes). Ciphertext and IV are stored base64-encoded in D1.
- * Plaintext tokens are never logged anywhere in this codebase.
+ * Ciphertexts are bound to their project row via AAD (see
+ * `projectTokenAad`). Plaintext tokens are never logged anywhere in
+ * this codebase.
  */
 
 export interface EncryptedValue {
@@ -43,16 +45,48 @@ export async function importEncryptionKey(base64Key: string): Promise<CryptoKey>
   ]);
 }
 
-export async function encryptText(key: CryptoKey, plaintext: string): Promise<EncryptedValue> {
+/**
+ * Versioned AES-GCM additional authenticated data (AAD) binding a stored
+ * project token to its registry row. A ciphertext transplanted into a
+ * different project's row will not decrypt (audit F5). This is a storage
+ * format: changing the context string invalidates existing ciphertexts.
+ */
+export function projectTokenAad(projectId: string): string {
+  return `authfleet:project-token:v1:${projectId}`;
+}
+
+export async function encryptText(
+  key: CryptoKey,
+  plaintext: string,
+  aad: string,
+): Promise<EncryptedValue> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plaintext);
-  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
+  const cipher = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) as BufferSource },
+    key,
+    encoded,
+  );
   return { ciphertext: bytesToBase64(new Uint8Array(cipher)), iv: bytesToBase64(iv) };
 }
 
-export async function decryptText(key: CryptoKey, value: EncryptedValue): Promise<string> {
+export async function decryptText(
+  key: CryptoKey,
+  value: EncryptedValue,
+  aad: string,
+): Promise<string> {
+  const iv = base64ToBytes(value.iv);
+  // WebCrypto accepts other IV lengths for AES-GCM; this codebase only
+  // ever writes 96-bit IVs, so reject anything else outright (audit F5).
+  if (iv.length !== 12) {
+    throw new Error(`stored token IV must be 12 bytes (got ${iv.length})`);
+  }
   const plain = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv: base64ToBytes(value.iv) as BufferSource },
+    {
+      name: "AES-GCM",
+      iv: iv as BufferSource,
+      additionalData: new TextEncoder().encode(aad) as BufferSource,
+    },
     key,
     base64ToBytes(value.ciphertext) as BufferSource,
   );

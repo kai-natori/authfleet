@@ -14,10 +14,10 @@
 
 | Severity | Count |
 | -------- | ----- |
-| Critical | 0 |
-| High     | 1 |
-| Medium   | 2 |
-| Low      | 5 |
+| Critical | 0     |
+| High     | 1     |
+| Medium   | 2     |
+| Low      | 5     |
 
 The cryptography, the response-shape discipline (tokens never leave the
 api), the target-D1 SQL construction, and the api's network exposure
@@ -37,10 +37,12 @@ through Cloudflare Access.
 
 - `apps/web/src/server/api.ts:45` — the operator identity is taken
   verbatim from the inbound request header and forwarded to the api:
+
   ```ts
   const fromAccess = request?.headers.get("cf-access-authenticated-user-email");
   if (fromAccess) return fromAccess;
   ```
+
   There is no validation of `Cf-Access-Jwt-Assertion` anywhere in the
   codebase (grep for `jwt` / `cf-access` across `apps/web/src`,
   `apps/api/src`, `apps/web/worker.mjs` returns only the line above).
@@ -123,6 +125,7 @@ to the client; log the detailed cause server-side only.
 - `apps/api/src/app.ts:46-47, 53-54` — `cfAccountId` and `d1DatabaseId`
   are validated only as strings of length 1-64.
 - `packages/core/src/d1-reader.ts:51`:
+
   ```ts
   const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
   ```
@@ -198,7 +201,7 @@ is an obvious deployment error, not a silent fallback.
 renders it. It is React-escaped in the UI (no XSS — see §4), but
 reflecting an attacker-controllable header value (see F1) into
 responses is needless surface. Drop the field, or keep it only as a
-display of the *verified* identity once F1's JWT check exists.
+display of the _verified_ identity once F1's JWT check exists.
 
 ---
 
@@ -334,3 +337,76 @@ display of the *verified* identity once F1's JWT check exists.
 4. **F5** before any real production tokens are stored (AAD is a
    ciphertext-format change; free now, a migration later).
 5. F6-F8 as hardening when convenient.
+
+---
+
+## Fix status — addendum, 2026-11-15
+
+All findings F1–F8 were fixed at the operator's instruction, before any
+real project tokens existed anywhere (so the F5 format change was
+free). Verification: core 22/22, api 17/17, web 10/10 tests (baselines
+were 17 / 11 / 0; new counts include the tests listed per finding);
+typecheck, Biome lint and build green. No live runs, per the house
+workflow.
+
+- **F1 — FIXED.** `apps/web/wrangler.jsonc` now sets
+  `"workers_dev": false`. Web verifies `Cf-Access-Jwt-Assertion` in
+  `apps/web/src/server/access.ts`: RS256 signature against the team
+  JWKS (`https://<team>/cdn-cgi/access/certs`, cached in-isolate with a
+  refetch on unknown `kid`), issuer, audience and expiry are all
+  checked, and the operator email forwarded to api comes from the
+  verified claims only — the plain email header is no longer read.
+  Config: `AUTHFLEET_ACCESS_TEAM_DOMAIN` + `AUTHFLEET_ACCESS_AUD`;
+  setting only one is an error, and with both set a missing/invalid
+  JWT throws (fail closed). The dev bypass applies only when Access is
+  not configured. Covered by 10 new web unit tests using a generated
+  RSA keypair and a stubbed JWKS endpoint (valid, tampered, wrong
+  audience/issuer, expired, unknown kid, missing email, malformed,
+  wrong alg).
+- **F2 — FIXED.** Api gate rejects non-email-shaped operator values
+  (401) and, when `AUTHFLEET_OPERATOR_EMAILS` is configured
+  (comma-separated, case-insensitive), operators outside the allowlist
+  (403). Production wiring parses the env var and logs a one-time
+  warning when it is unset while the dev bypass is off. Tests cover
+  allowed/denied/shape cases.
+- **F3 — FIXED.** Stats and snapshot endpoints return generic errors
+  (`failed to read project stats` / `failed to snapshot project`) and
+  log the cause server-side. `D1ReadError` now keeps the Cloudflare
+  detail in a separate `detail` field (with `code`) for server logs;
+  its `message` is generic. The snapshot job includes the detail in its
+  (server-side) result strings for cron logging. Tests assert upstream
+  codes/messages never appear in response bodies.
+- **F4 — FIXED.** Zod schemas require a 32-hex account id and a
+  UUID-shaped database id on create and update; the reader
+  `encodeURIComponent`s both path segments. Tests cover malformed ids
+  (including a path-traversal attempt) and the encoded URL.
+- **F5 — FIXED.** `encryptText`/`decryptText` take an AAD context;
+  call sites use `projectTokenAad(projectId)` =
+  `authfleet:project-token:v1:<id>`. The api generates the project id
+  before encrypting at creation (repositories accept a caller-supplied
+  id). Decryption rejects non-12-byte IVs. Tests: cross-row transplant
+  fails at both core and api level; the owning project still decrypts.
+- **F6 — FIXED.** `RemoteD1Reader.query()` enforces single-statement
+  SELECT-only via `assertReadOnlyQuery` (leading comments stripped;
+  `WITH ... SELECT` allowed after walking the CTE definitions; a
+  `WITH` ending in a write is refused) before any network call. Tests
+  cover DELETE/UPDATE/INSERT/DROP, multi-statement, and allowed shapes.
+- **F7 — FIXED.** `apps/api/wrangler.jsonc` no longer commits any
+  `vars` (bypass/demo flags are absent = off; a comment records why),
+  and `apps/web/wrangler.jsonc` no longer ships the `127.0.0.1`
+  `AUTHFLEET_API_URL` fallback — a missing service binding is now a
+  loud deployment error. `.dev.vars.example` remains the local-dev
+  source (bypass `1` there is correct and documented as local-only).
+- **F8 — FIXED.** `GET /api/projects` no longer includes the operator
+  identity (test asserts its absence). The dashboard still displays
+  the operator — now sourced from web's own verified identity via
+  `getOperatorFn`, i.e. the verified JWT email, which is exactly the
+  "display of the verified identity" option this finding suggested.
+
+Observation (not a finding): the pre-existing core test "creates
+time-ordered ids" is inherently flaky — `newId()` uses the
+non-monotonic `ulid()` factory, so two ids minted in the same
+millisecond are randomly ordered and the assertion can fail by chance
+(observed once during the fix verification run; the test passes in
+isolation). Untouched by these fixes; a monotonic factory or a
+relaxed assertion would settle it.

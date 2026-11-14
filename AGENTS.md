@@ -17,9 +17,12 @@ for the product/security model and `openspec/` for behaviour contracts.
 1. **Tokens**: project Cloudflare API tokens are stored AES-GCM-encrypted
    only, never returned by the api, never logged. IDs are lowercase
    ULIDs; secrets never are.
-2. **Operator identity**: every `/api/*` call needs `x-authfleet-operator`
-   (forwarded Access email), except `/health`. The dev bypass
-   (`AUTHFLEET_DEV_BYPASS`) is local-only.
+2. **Operator identity**: every `/api/*` call needs `x-authfleet-operator`,
+   except `/health`. Web derives it from the **verified** Cloudflare
+   Access JWT (`apps/web/src/server/access.ts`) — never from the plain
+   email header — and api enforces the `AUTHFLEET_OPERATOR_EMAILS`
+   allowlist when configured. The dev bypass (`AUTHFLEET_DEV_BYPASS`)
+   is local-only and inert when Access verification is configured.
 3. **Read-only toward targets**: core issues `SELECT`s only against
    target D1 databases.
 4. **Specs before behaviour changes**: add/update an OpenSpec change,

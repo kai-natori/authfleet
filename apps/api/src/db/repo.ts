@@ -59,7 +59,7 @@ export class DrizzleProjectRepository implements ProjectRepository {
   async createProject(data: CreateProjectData): Promise<ProjectRecord> {
     const now = new Date().toISOString();
     const row = {
-      id: newId(),
+      id: data.id ?? newId(),
       name: data.name,
       cfAccountId: data.cfAccountId,
       d1DatabaseId: data.d1DatabaseId,

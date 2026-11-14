@@ -86,7 +86,7 @@ describe("RemoteD1Reader", () => {
     await expect(r.getUserStats()).rejects.toBeInstanceOf(D1ReadError);
   });
 
-  it("surfaces Cloudflare API errors without leaking the token", async () => {
+  it("keeps Cloudflare error detail server-side only and never leaks the token (F3)", async () => {
     const failingFetch = async () =>
       ({
         status: 401,
@@ -102,7 +102,85 @@ describe("RemoteD1Reader", () => {
       token: "super-secret-token",
       fetchFn: failingFetch as typeof fetch,
     });
-    await expect(r.getUserStats()).rejects.toThrow(/Authentication error/);
-    await expect(r.getUserStats()).rejects.not.toThrow(/super-secret-token/);
+    const err = await r.getUserStats().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(D1ReadError);
+    const readErr = err as D1ReadError;
+    // The client-facing message is generic; the CF detail lives in a
+    // separate field for server logs and carries the CF code.
+    expect(readErr.message).toBe("D1 query failed");
+    expect(readErr.message).not.toContain("Authentication error");
+    expect(readErr.detail).toContain("Authentication error");
+    expect(readErr.code).toBe(10000);
+    expect(readErr.detail).not.toContain("super-secret-token");
+  });
+
+  it("refuses non-SELECT statements before any network call (F6)", async () => {
+    let fetchCalls = 0;
+    const countingFetch = async () => {
+      fetchCalls++;
+      return {
+        status: 200,
+        json: async () => ({ success: true, errors: [], result: [{ results: [] }] }),
+      } as Response;
+    };
+    const r = new RemoteD1Reader({
+      accountId: "a",
+      databaseId: "d",
+      token: "t",
+      fetchFn: countingFetch as typeof fetch,
+    });
+    await expect(r.query("DELETE FROM user")).rejects.toBeInstanceOf(D1ReadError);
+    await expect(r.query("UPDATE user SET name = 'x'")).rejects.toBeInstanceOf(D1ReadError);
+    await expect(r.query("INSERT INTO user VALUES (1)")).rejects.toBeInstanceOf(D1ReadError);
+    await expect(r.query("DROP TABLE user")).rejects.toBeInstanceOf(D1ReadError);
+    await expect(r.query("SELECT 1; SELECT 2")).rejects.toBeInstanceOf(D1ReadError);
+    await expect(
+      r.query("WITH x AS (SELECT 1) DELETE FROM user WHERE id IN (SELECT * FROM x)"),
+    ).rejects.toBeInstanceOf(D1ReadError);
+    expect(fetchCalls).toBe(0);
+  });
+
+  it("allows SELECT and WITH ... SELECT, tolerating comments and a trailing semicolon (F6)", async () => {
+    let fetchCalls = 0;
+    const okFetch = async () => {
+      fetchCalls++;
+      return {
+        status: 200,
+        json: async () => ({ success: true, errors: [], result: [{ results: [] }] }),
+      } as Response;
+    };
+    const r = new RemoteD1Reader({
+      accountId: "a",
+      databaseId: "d",
+      token: "t",
+      fetchFn: okFetch as typeof fetch,
+    });
+    await r.query("SELECT 1");
+    await r.query("  select 2;  ");
+    await r.query("-- a comment\nSELECT 3");
+    await r.query("/* block */ WITH x AS (SELECT 1) SELECT * FROM x");
+    await r.query("WITH a AS (SELECT 1), b AS (SELECT 2) SELECT * FROM a JOIN b ON 1 = 1");
+    expect(fetchCalls).toBe(5);
+  });
+
+  it("URL-encodes the account and database ids in the query URL (F4)", async () => {
+    let seenUrl = "";
+    const capturingFetch = async (url: unknown) => {
+      seenUrl = String(url);
+      return {
+        status: 200,
+        json: async () => ({ success: true, errors: [], result: [{ results: [] }] }),
+      } as Response;
+    };
+    const r = new RemoteD1Reader({
+      accountId: "ac/c?x",
+      databaseId: "db#frag",
+      token: "t",
+      fetchFn: capturingFetch as typeof fetch,
+    });
+    await r.query("SELECT 1");
+    expect(seenUrl).toBe(
+      "https://api.cloudflare.com/client/v4/accounts/ac%2Fc%3Fx/d1/database/db%23frag/query",
+    );
   });
 });

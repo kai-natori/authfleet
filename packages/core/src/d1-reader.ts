@@ -4,17 +4,119 @@ import type { DailySignup, UserStats } from "./types";
  * Reads a target project's user statistics from its Cloudflare D1
  * database through the Cloudflare D1 HTTP query API.
  *
- * Only SELECT statements are ever issued, and the token used is the
+ * Only SELECT statements are ever issued — enforced inside `query()`
+ * itself, not just by caller discipline — and the token used is the
  * project's own read-only token, decrypted by the caller.
  */
 
 export class D1ReadError extends Error {
   readonly code: number | undefined;
-  constructor(message: string, code?: number) {
+  /**
+   * Upstream (Cloudflare) error detail. Server-side diagnostics ONLY:
+   * api endpoints must never forward this to clients (audit F3) — they
+   * return `message`, which is deliberately generic.
+   */
+  readonly detail: string | undefined;
+  constructor(message: string, options?: { code?: number; detail?: string }) {
     super(message);
     this.name = "D1ReadError";
-    this.code = code;
+    this.code = options?.code;
+    this.detail = options?.detail;
   }
+}
+
+/** Strip leading whitespace and SQL comments (`--` line, `/* block *\/`). */
+function stripLeadingComments(sql: string): string {
+  let rest = sql.trimStart();
+  for (;;) {
+    if (rest.startsWith("--")) {
+      const nl = rest.indexOf("\n");
+      if (nl === -1) return "";
+      rest = rest.slice(nl + 1).trimStart();
+    } else if (rest.startsWith("/*")) {
+      const end = rest.indexOf("*/");
+      if (end === -1) return "";
+      rest = rest.slice(end + 2).trimStart();
+    } else {
+      return rest;
+    }
+  }
+}
+
+/**
+ * Read-only enforcement for target databases (audit F6): the statement
+ * must be a single SELECT — either directly, or as the main statement
+ * of a WITH ... SELECT. Anything else throws before any network call.
+ */
+export function assertReadOnlyQuery(sql: string): void {
+  const body = stripLeadingComments(sql).replace(/;\s*$/, "");
+  if (body.includes(";")) {
+    throw new D1ReadError("Refused: multiple SQL statements in one query");
+  }
+  const firstWord = /^[A-Za-z]+/.exec(body)?.[0]?.toUpperCase();
+  if (firstWord === "SELECT") return;
+  if (firstWord === "WITH") {
+    if (withMainStatementIsSelect(body)) return;
+    throw new D1ReadError("Refused: WITH statement whose main statement is not a SELECT");
+  }
+  throw new D1ReadError("Refused: only SELECT statements are allowed against target databases");
+}
+
+/** Walk a WITH clause's CTE definitions and check what follows them. */
+function withMainStatementIsSelect(sql: string): boolean {
+  let i = "WITH".length;
+  const skipWs = () => {
+    while (i < sql.length && /\s/.test(sql.charAt(i))) i++;
+  };
+  skipWs();
+  if (/^RECURSIVE\b/i.test(sql.slice(i))) i += "RECURSIVE".length;
+  for (;;) {
+    skipWs();
+    // CTE name (bare or quoted identifier), optional column list.
+    const name = /^("[^"]+"|[A-Za-z_][A-Za-z0-9_]*)/.exec(sql.slice(i));
+    if (!name) return false;
+    i += name[0].length;
+    skipWs();
+    if (sql[i] === "(") {
+      const close = matchingParen(sql, i);
+      if (close === -1) return false;
+      i = close + 1;
+      skipWs();
+    }
+    if (!/^AS\b/i.test(sql.slice(i))) return false;
+    i += 2;
+    skipWs();
+    if (sql[i] !== "(") return false;
+    const close = matchingParen(sql, i);
+    if (close === -1) return false;
+    i = close + 1;
+    skipWs();
+    if (sql[i] === ",") {
+      i++;
+      continue;
+    }
+    break;
+  }
+  return /^SELECT\b/i.test(sql.slice(i));
+}
+
+function matchingParen(sql: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") {
+      // Skip string literals so parens inside them don't count.
+      i++;
+      while (i < sql.length && sql[i] !== "'") i++;
+      continue;
+    }
+    if (ch === "(") depth++;
+    else if (ch === ")") {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
 }
 
 interface D1QueryResponse {
@@ -48,7 +150,11 @@ export class RemoteD1Reader {
   }
 
   async query(sql: string, params: unknown[] = []): Promise<Record<string, unknown>[]> {
-    const url = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/d1/database/${this.databaseId}/query`;
+    assertReadOnlyQuery(sql);
+    // Path segments are URL-encoded so stored config values can never
+    // reshape the request path (audit F4); creation also validates the
+    // formats, this is the second layer.
+    const url = `https://api.cloudflare.com/client/v4/accounts/${encodeURIComponent(this.accountId)}/d1/database/${encodeURIComponent(this.databaseId)}/query`;
     let response: Response;
     try {
       response = await this.fetchFn(url, {
@@ -60,19 +166,17 @@ export class RemoteD1Reader {
         body: JSON.stringify({ sql, params }),
       });
     } catch (cause) {
-      throw new D1ReadError(
-        `Could not reach the Cloudflare D1 API: ${cause instanceof Error ? cause.message : String(cause)}`,
-      );
+      throw new D1ReadError("Could not reach the Cloudflare D1 API", {
+        detail: cause instanceof Error ? cause.message : String(cause),
+      });
     }
     const body = (await response.json().catch(() => null)) as D1QueryResponse | null;
     if (!body?.success) {
       const first = body?.errors?.[0];
-      throw new D1ReadError(
-        first
-          ? `D1 query failed (${first.code}): ${first.message}`
-          : `D1 query failed: HTTP ${response.status}`,
-        first?.code,
-      );
+      throw new D1ReadError("D1 query failed", {
+        code: first?.code,
+        detail: first ? `(${first.code}) ${first.message}` : `HTTP ${response.status}`,
+      });
     }
     return body.result?.[0]?.results ?? [];
   }

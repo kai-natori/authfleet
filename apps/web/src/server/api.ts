@@ -10,11 +10,21 @@ import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
  * Local dev: falls back to HTTP at AUTHFLEET_API_URL
  * (default http://127.0.0.1:8788, `wrangler dev` for apps/api).
  *
- * Every call forwards the operator identity: the
- * `Cf-Access-Authenticated-User-Email` header Cloudflare Access injected
- * in front of this web app. Without Access (local dev), the documented
- * dev bypass identity is used when AUTHFLEET_DEV_BYPASS=1.
+ * Every call forwards the operator identity as `x-authfleet-operator`.
+ * The identity comes from the VERIFIED Cloudflare Access JWT
+ * (`Cf-Access-Jwt-Assertion`, checked against the team JWKS and the
+ * configured AUD — see ./access.ts), never from the plain
+ * `Cf-Access-Authenticated-User-Email` header, which is spoofable on
+ * any path that reaches this Worker without traversing Access
+ * (audit F1). Access verification is configured with
+ * AUTHFLEET_ACCESS_TEAM_DOMAIN + AUTHFLEET_ACCESS_AUD; when Access is
+ * configured the JWT is mandatory and invalid/missing assertions throw
+ * (fail closed). Without Access config (local dev only), the documented
+ * dev bypass identity is used when AUTHFLEET_DEV_BYPASS=1; otherwise no
+ * identity is sent and the api answers 401.
  */
+
+import { verifyAccessJwt } from "./access";
 
 interface ApiBinding {
   fetch: (request: Request) => Promise<Response>;
@@ -22,7 +32,6 @@ interface ApiBinding {
 
 export interface ProjectsResponse {
   projects: PublicProject[];
-  operator: string;
 }
 
 export interface ProjectStatsResponse {
@@ -36,19 +45,38 @@ function getApiBinding(): ApiBinding | null {
   return binding && typeof binding.fetch === "function" ? binding : null;
 }
 
+/** Read a config value from the Worker env (bindings/vars) or process env. */
+function serverEnv(name: string): string | undefined {
+  const env = globalThis.__AUTHFLEET_ENV__ as Record<string, unknown> | undefined;
+  const fromWorker = env?.[name];
+  if (typeof fromWorker === "string" && fromWorker.length > 0) return fromWorker;
+  const fromProcess = process.env[name];
+  return fromProcess && fromProcess.length > 0 ? fromProcess : undefined;
+}
+
 async function operatorEmail(): Promise<string | undefined> {
-  try {
+  const teamDomain = serverEnv("AUTHFLEET_ACCESS_TEAM_DOMAIN");
+  const audience = serverEnv("AUTHFLEET_ACCESS_AUD");
+  if (teamDomain || audience) {
+    if (!teamDomain || !audience) {
+      throw new Error(
+        "Cloudflare Access is partially configured: set both AUTHFLEET_ACCESS_TEAM_DOMAIN and AUTHFLEET_ACCESS_AUD",
+      );
+    }
     // Dynamic import: this module is server-only (see callApi below) and
     // must never be pulled into the client bundle.
     const { getRequest } = await import("@tanstack/react-start/server");
-    const request = getRequest();
-    const fromAccess = request?.headers.get("cf-access-authenticated-user-email");
-    if (fromAccess) return fromAccess;
-  } catch {
-    // Not in a request context (should not happen for server functions).
+    const assertion = getRequest()?.headers.get("cf-access-jwt-assertion");
+    if (!assertion) {
+      throw new Error("Cloudflare Access JWT (Cf-Access-Jwt-Assertion) is missing");
+    }
+    const claims = await verifyAccessJwt(assertion, { teamDomain, audience });
+    return claims.email;
   }
-  if (process.env.AUTHFLEET_DEV_BYPASS === "1") {
-    return process.env.AUTHFLEET_DEV_OPERATOR ?? "dev@local";
+  // No Access configured: local development only. The dev bypass is
+  // strictly env-gated and never active when Access is configured.
+  if (serverEnv("AUTHFLEET_DEV_BYPASS") === "1") {
+    return serverEnv("AUTHFLEET_DEV_OPERATOR") ?? "dev@local";
   }
   return undefined;
 }
@@ -83,6 +111,17 @@ export const callApi = createServerOnlyFn(
 
 export const listProjectsFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<ProjectsResponse> => callApi<ProjectsResponse>("/api/projects"),
+);
+
+/**
+ * The operator identity for display, resolved (and, with Access
+ * configured, cryptographically verified) on the web side. The api no
+ * longer echoes the identity back (audit F8).
+ */
+export const getOperatorFn = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ operator: string | null }> => ({
+    operator: (await operatorEmail()) ?? null,
+  }),
 );
 
 export const getProjectStatsFn = createServerFn({ method: "GET" })

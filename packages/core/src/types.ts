@@ -63,6 +63,12 @@ export interface SnapshotRecord {
 }
 
 export interface CreateProjectData {
+  /**
+   * Optional caller-supplied row id. The api generates the id up front
+   * because the token ciphertext is AAD-bound to it (see core crypto).
+   * Repositories fall back to `newId()` when absent.
+   */
+  id?: string;
   name: string;
   cfAccountId: string;
   d1DatabaseId: string;

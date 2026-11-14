@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
-import { getProjectStatsFn, listProjectsFn } from "~/server/api";
+import { getOperatorFn, getProjectStatsFn, listProjectsFn } from "~/server/api";
 
 export const Route = createFileRoute("/")({
   validateSearch: (search: Record<string, unknown>) => ({
@@ -17,10 +17,10 @@ export const Route = createFileRoute("/")({
   }),
   loaderDeps: ({ search }) => ({ project: search.project }),
   loader: async ({ deps }) => {
-    const { projects, operator } = await listProjectsFn();
+    const [{ projects }, { operator }] = await Promise.all([listProjectsFn(), getOperatorFn()]);
     const selected = projects.find((p) => p.id === deps.project) ?? projects[0];
     const stats = selected ? await getProjectStatsFn({ data: selected.id }) : null;
-    return { projects, operator, selectedId: selected?.id, stats };
+    return { projects, operator: operator ?? "unknown", selectedId: selected?.id, stats };
   },
   component: DashboardPage,
 });

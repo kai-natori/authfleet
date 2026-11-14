@@ -47,3 +47,22 @@
 - [x] Unit tests / typecheck / lint run and recorded
 - [ ] Runtime verification on the operator's Mac (dev servers, Access
   policy, real project registration) — by design not done in CI/sandbox
+
+## 6. Security audit fixes (2026-11-15, `SECURITY-AUDIT.md` F1–F8)
+
+- [x] F1: web `workers_dev: false`; Access JWT verification in web
+  (`src/server/access.ts`), operator email from verified claims only
+- [x] F2: api operator allowlist (`AUTHFLEET_OPERATOR_EMAILS`) +
+  email-shape check at the gate
+- [x] F3: generic client errors from stats/snapshot; upstream detail
+  server-side only (`D1ReadError.detail`)
+- [x] F4: account-id / database-id format validation + `encodeURIComponent`
+  when building the Cloudflare API URL
+- [x] F5: AES-GCM AAD bound to the project row; 12-byte IV enforced on
+  decrypt; project id generated before encryption at creation
+- [x] F6: SELECT-only single-statement enforcement inside
+  `RemoteD1Reader.query()`
+- [x] F7: no bypass/demo flags or local API URL in committed wrangler
+  vars (absence = off; local values live in `.dev.vars` / shell env)
+- [x] F8: api no longer echoes the operator identity; web displays it
+  from its own verified JWT (`getOperatorFn`)

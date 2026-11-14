@@ -4,6 +4,19 @@ import { type AppDeps, createApp } from "../src/app";
 
 const KEY_B64 = Buffer.from(new Uint8Array(32).fill(3)).toString("base64");
 const OPERATOR = { "x-authfleet-operator": "op@example.com", "content-type": "application/json" };
+/** Format-valid fixtures (audit F4 validation): 32-hex account, UUID database. */
+const CF_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+const D1_DATABASE_ID = "123e4567-e89b-42d3-a456-426614174000";
+
+function projectPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    name: "Acme",
+    cfAccountId: CF_ACCOUNT_ID,
+    d1DatabaseId: D1_DATABASE_ID,
+    token: "cf-token-abcdef9999",
+    ...overrides,
+  };
+}
 
 function testDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   return {
@@ -39,8 +52,35 @@ describe("operator gate", () => {
     const app = createApp(testDeps({ devBypass: true, devOperator: "dev@local" }));
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { operator: string };
-    expect(body.operator).toBe("dev@local");
+  });
+
+  it("rejects non-email-shaped operator values (F2)", async () => {
+    const app = createApp(testDeps());
+    for (const bad of ["x", "not-an-email", "a b@c"]) {
+      const res = await app.request("/api/projects", {
+        headers: { "x-authfleet-operator": bad },
+      });
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("enforces the operator allowlist when configured (F2)", async () => {
+    const app = createApp(testDeps({ operatorEmails: ["Owner@Example.com"] }));
+    const allowed = await app.request("/api/projects", {
+      headers: { "x-authfleet-operator": "owner@example.com" },
+    });
+    expect(allowed.status).toBe(200);
+    const denied = await app.request("/api/projects", { headers: OPERATOR });
+    expect(denied.status).toBe(403);
+  });
+
+  it("does not echo the operator identity in responses (F8)", async () => {
+    const app = createApp(testDeps());
+    const res = await app.request("/api/projects", { headers: OPERATOR });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as Record<string, unknown>;
+    expect(body).not.toHaveProperty("operator");
+    expect(JSON.stringify(body)).not.toContain("op@example.com");
   });
 });
 
@@ -51,12 +91,7 @@ describe("projects CRUD", () => {
     const res = await app.request("/api/projects", {
       method: "POST",
       headers: OPERATOR,
-      body: JSON.stringify({
-        name: "Acme",
-        cfAccountId: "acct-1",
-        d1DatabaseId: "db-1",
-        token: "cf-token-abcdef9999",
-      }),
+      body: JSON.stringify(projectPayload()),
     });
     expect(res.status).toBe(201);
     const body = (await res.json()) as {
@@ -80,6 +115,24 @@ describe("projects CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("rejects malformed Cloudflare account / database ids (F4)", async () => {
+    const app = createApp(testDeps());
+    for (const bad of [
+      projectPayload({ cfAccountId: "acct-1" }),
+      projectPayload({ cfAccountId: "0123456789abcdef0123456789abcdeg" }),
+      projectPayload({ cfAccountId: "../../admin" }),
+      projectPayload({ d1DatabaseId: "db-1" }),
+      projectPayload({ d1DatabaseId: "123e4567e89b42d3a456426614174000" }),
+    ]) {
+      const res = await app.request("/api/projects", {
+        method: "POST",
+        headers: OPERATOR,
+        body: JSON.stringify(bad),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
   it("includes the demo project when demo mode is on", async () => {
     const app = createApp(testDeps());
     const res = await app.request("/api/projects", { headers: OPERATOR });
@@ -94,12 +147,7 @@ describe("projects CRUD", () => {
     const created = await app.request("/api/projects", {
       method: "POST",
       headers: OPERATOR,
-      body: JSON.stringify({
-        name: "X",
-        cfAccountId: "a",
-        d1DatabaseId: "d",
-        token: "12345678tok",
-      }),
+      body: JSON.stringify(projectPayload({ name: "X", token: "12345678tok" })),
     });
     const { project } = (await created.json()) as { project: { id: string } };
     const res = await app.request(`/api/projects/${project.id}`, {
@@ -132,12 +180,7 @@ describe("stats", () => {
     const created = await app.request("/api/projects", {
       method: "POST",
       headers: OPERATOR,
-      body: JSON.stringify({
-        name: "Y",
-        cfAccountId: "a",
-        d1DatabaseId: "d",
-        token: "12345678tok",
-      }),
+      body: JSON.stringify(projectPayload({ name: "Y", token: "12345678tok" })),
     });
     const { project } = (await created.json()) as { project: { id: string } };
     const res = await app.request(`/api/projects/${project.id}/stats`, { headers: OPERATOR });
@@ -155,18 +198,75 @@ describe("stats", () => {
     expect(res.status).toBe(404);
   });
 
+  it("returns a generic error when the upstream reader fails (F3)", async () => {
+    const deps = testDeps();
+    const app = createApp(
+      testDeps({
+        repo: deps.repo,
+        readerFactory: () => ({
+          getUserStats: async () => {
+            throw new Error("D1 query failed (7404): no such table: user in account 99887766");
+          },
+        }),
+      }),
+    );
+    const created = await app.request("/api/projects", {
+      method: "POST",
+      headers: OPERATOR,
+      body: JSON.stringify(projectPayload({ name: "Err" })),
+    });
+    const { project } = (await created.json()) as { project: { id: string } };
+
+    const statsRes = await app.request(`/api/projects/${project.id}/stats`, { headers: OPERATOR });
+    expect(statsRes.status).toBe(502);
+    const statsBody = (await statsRes.json()) as { error: string };
+    expect(statsBody.error).toBe("failed to read project stats");
+    expect(JSON.stringify(statsBody)).not.toContain("7404");
+    expect(JSON.stringify(statsBody)).not.toContain("99887766");
+
+    const snapRes = await app.request(`/api/projects/${project.id}/snapshot`, {
+      method: "POST",
+      headers: OPERATOR,
+    });
+    expect(snapRes.status).toBe(502);
+    const snapBody = (await snapRes.json()) as { error: string };
+    expect(snapBody.error).toBe("failed to snapshot project");
+  });
+
+  it("a token ciphertext transplanted into another project row does not decrypt (F5)", async () => {
+    const deps = testDeps();
+    const app = createApp(deps);
+    const create = async (name: string) => {
+      const res = await app.request("/api/projects", {
+        method: "POST",
+        headers: OPERATOR,
+        body: JSON.stringify(projectPayload({ name })),
+      });
+      return ((await res.json()) as { project: { id: string } }).project;
+    };
+    const a = await create("A");
+    const b = await create("B");
+    const storedA = await deps.repo.getProject(a.id);
+    expect(storedA).not.toBeNull();
+    // Simulate a registry-write attacker copying A's ciphertext into B's row.
+    await deps.repo.updateProject(b.id, {
+      tokenCiphertext: storedA?.tokenCiphertext,
+      tokenIv: storedA?.tokenIv,
+    });
+    const res = await app.request(`/api/projects/${b.id}/stats`, { headers: OPERATOR });
+    expect(res.status).toBe(502);
+    // A's own stats still work.
+    const okRes = await app.request(`/api/projects/${a.id}/stats`, { headers: OPERATOR });
+    expect(okRes.status).toBe(200);
+  });
+
   it("manual snapshot records today's total", async () => {
     const deps = testDeps();
     const app = createApp(deps);
     const created = await app.request("/api/projects", {
       method: "POST",
       headers: OPERATOR,
-      body: JSON.stringify({
-        name: "Z",
-        cfAccountId: "a",
-        d1DatabaseId: "d",
-        token: "12345678tok",
-      }),
+      body: JSON.stringify(projectPayload({ name: "Z", token: "12345678tok" })),
     });
     const { project } = (await created.json()) as { project: { id: string } };
     const res = await app.request(`/api/projects/${project.id}/snapshot`, {

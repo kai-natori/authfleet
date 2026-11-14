@@ -23,12 +23,21 @@ and SHALL list, update and delete registered projects.
 
 Stored project API tokens SHALL be encrypted at rest with AES-GCM
 (WebCrypto) using a key from a Worker secret, and SHALL never be logged
-or returned in plaintext.
+or returned in plaintext. The ciphertext SHALL be bound to its project
+row via AES-GCM additional authenticated data (the project id in a
+versioned context string), so a ciphertext transplanted into another
+project's row SHALL NOT decrypt.
 
 #### Scenario: Stored row inspected directly
 
 - WHEN the registry D1 `projects` row is read raw
 - THEN only ciphertext, IV and a last-4 hint are present
+
+#### Scenario: Ciphertext transplanted across rows
+
+- WHEN one project's ciphertext and IV are copied into another
+  project's row and that project is read
+- THEN decryption fails and no statistics are returned for it
 
 ### Requirement: User statistics per project
 
@@ -68,19 +77,32 @@ project switcher. Combined totals across projects are NOT required.
 
 ### Requirement: Api is reachable only via service binding
 
-The api Worker SHALL be deployed with `workers_dev = false` and no
-routes; the web Worker SHALL call it only through a Cloudflare service
-binding. Every api call SHALL carry the operator identity forwarded from
-Cloudflare Access (`Cf-Access-Authenticated-User-Email` via web), and
-api SHALL reject calls without an operator identity, except under the
-local-development bypass flag which SHALL never be enabled in
-production.
+Both Workers SHALL be deployed with `workers_dev = false`; the api
+Worker SHALL have no routes, and web SHALL call it only through a
+Cloudflare service binding. Every api call SHALL carry the operator
+identity, which web SHALL derive from the VERIFIED Cloudflare Access
+JWT (`Cf-Access-Jwt-Assertion`) — never from the plain email header.
+Api SHALL reject calls without an email-shaped operator identity and
+SHALL NOT echo the identity in responses.
 
 #### Scenario: Call without operator identity
 
 - WHEN an api route is called with no operator header and the dev
   bypass is off
 - THEN the call is rejected with 401
+
+#### Scenario: Operator outside the allowlist
+
+- WHEN the api allowlist (`AUTHFLEET_OPERATOR_EMAILS`) is configured
+  and an api route is called with an operator identity outside it
+- THEN the call is rejected with 403
+
+#### Scenario: Dev bypass versus Access
+
+- WHEN Access verification is configured on web
+- THEN the local-development bypass has no effect, and a missing or
+  invalid Access JWT fails closed; the bypass SHALL never be enabled
+  in production
 
 ### Requirement: Demo mode
 

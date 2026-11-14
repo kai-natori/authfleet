@@ -13,6 +13,8 @@
   "name": "authfleet-api",
   "observability": { "enabled": true },
   "triggers": { "crons": ["5 0 * * *"] },
-  "vars": { "AUTHFLEET_DEMO": "0", "AUTHFLEET_DEV_BYPASS": "0" },
+  // No committed `vars` on purpose (audit F7): demo/dev-bypass flags are
+  // absent = off. Local values belong in .dev.vars (see .dev.vars.example);
+  // production values are set as Worker secrets/vars at deploy time.
   "workers_dev": false
 }

@@ -7,8 +7,10 @@ import {
   demoSnapshots,
   demoStats,
   encryptText,
+  newId,
   type ProjectRecord,
   type ProjectRepository,
+  projectTokenAad,
   RemoteD1Reader,
   tokenHint,
   toPublicProject,
@@ -35,23 +37,46 @@ export interface AppDeps {
   demoEnabled?: boolean;
   devBypass?: boolean;
   devOperator?: string;
+  /**
+   * Operator allowlist (audit F2): when set (non-empty), only these
+   * emails may call the api, whatever the Access policy in front of web
+   * admits. Compared case-insensitively. Production wiring reads
+   * AUTHFLEET_OPERATOR_EMAILS; when it is unset the gate falls back to
+   * presence-only (and production wiring logs a warning) — set it.
+   */
+  operatorEmails?: string[];
   /** Injectable for tests; defaults to the real remote D1 reader. */
   readerFactory?: (project: ProjectRecord, token: string) => StatsReader;
 }
 
 type Variables = { operator: string };
 
+/** Cloudflare account ids are 32 hex characters (audit F4). */
+const cfAccountIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[0-9a-fA-F]{32}$/, "cfAccountId must be a 32-character hex Cloudflare account id");
+
+/** D1 database ids are UUIDs (audit F4). */
+const d1DatabaseIdSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+    "d1DatabaseId must be a UUID",
+  );
+
 const projectCreateSchema = z.object({
   name: z.string().trim().min(1).max(120),
-  cfAccountId: z.string().trim().min(1).max(64),
-  d1DatabaseId: z.string().trim().min(1).max(64),
+  cfAccountId: cfAccountIdSchema,
+  d1DatabaseId: d1DatabaseIdSchema,
   token: z.string().trim().min(8).max(512),
 });
 
 const projectUpdateSchema = z.object({
   name: z.string().trim().min(1).max(120).optional(),
-  cfAccountId: z.string().trim().min(1).max(64).optional(),
-  d1DatabaseId: z.string().trim().min(1).max(64).optional(),
+  cfAccountId: cfAccountIdSchema.optional(),
+  d1DatabaseId: d1DatabaseIdSchema.optional(),
   token: z.string().trim().min(8).max(512).optional(),
 });
 
@@ -70,9 +95,20 @@ export function createApp(deps: AppDeps) {
   app.get("/health", (c) => c.json({ ok: true, service: "authfleet-api" }));
 
   // Operator identity gate for everything under /api.
+  const allowlist = deps.operatorEmails?.map((e) => e.trim().toLowerCase()).filter(Boolean);
   app.use("/api/*", async (c, next) => {
     const operator = c.req.header("x-authfleet-operator");
     if (operator) {
+      // The identity must be email-shaped (audit F2): a bare string
+      // proves nothing beyond "the caller could set a header".
+      if (!/^[^\s@]+@[^\s@]+$/.test(operator)) {
+        return c.json({ error: "operator identity invalid" }, 401);
+      }
+      // Second layer behind the Access policy (audit F2): when an
+      // allowlist is configured, only listed operators get in.
+      if (allowlist && allowlist.length > 0 && !allowlist.includes(operator.toLowerCase())) {
+        return c.json({ error: "operator not allowed" }, 403);
+      }
       c.set("operator", operator);
       return next();
     }
@@ -90,10 +126,14 @@ export function createApp(deps: AppDeps) {
 
   async function readerFor(project: ProjectRecord): Promise<StatsReader> {
     const key = await deps.getEncryptionKey();
-    const token = await decryptText(key, {
-      ciphertext: project.tokenCiphertext,
-      iv: project.tokenIv,
-    });
+    const token = await decryptText(
+      key,
+      {
+        ciphertext: project.tokenCiphertext,
+        iv: project.tokenIv,
+      },
+      projectTokenAad(project.id),
+    );
     return readerFactory(project, token);
   }
 
@@ -101,7 +141,9 @@ export function createApp(deps: AppDeps) {
     const records = await deps.repo.listProjects();
     const projects = records.map(toPublicProject);
     if (deps.demoEnabled) projects.unshift(toPublicProject(demoProject()));
-    return c.json({ projects, operator: c.get("operator") });
+    // The operator identity is deliberately NOT echoed back (audit F8);
+    // web displays the identity from its own verified Access JWT.
+    return c.json({ projects });
   });
 
   app.post("/api/projects", async (c) => {
@@ -109,9 +151,13 @@ export function createApp(deps: AppDeps) {
     if (!parsed.success) {
       return c.json({ error: "invalid project payload", issues: parsed.error.issues }, 400);
     }
+    // The row id is generated up front: the token ciphertext is
+    // AAD-bound to it (audit F5), so encryption needs the id first.
+    const id = newId();
     const key = await deps.getEncryptionKey();
-    const encrypted = await encryptText(key, parsed.data.token);
+    const encrypted = await encryptText(key, parsed.data.token, projectTokenAad(id));
     const record = await deps.repo.createProject({
+      id,
       name: parsed.data.name,
       cfAccountId: parsed.data.cfAccountId,
       d1DatabaseId: parsed.data.d1DatabaseId,
@@ -133,7 +179,7 @@ export function createApp(deps: AppDeps) {
     const patch: Parameters<ProjectRepository["updateProject"]>[1] = { ...rest };
     if (token) {
       const key = await deps.getEncryptionKey();
-      const encrypted = await encryptText(key, token);
+      const encrypted = await encryptText(key, token, projectTokenAad(id));
       patch.tokenCiphertext = encrypted.ciphertext;
       patch.tokenIv = encrypted.iv;
       patch.tokenHint = tokenHint(token);
@@ -170,10 +216,10 @@ export function createApp(deps: AppDeps) {
         summary: buildStatsSummary(stats, snapshots),
       });
     } catch (cause) {
-      return c.json(
-        { error: cause instanceof Error ? cause.message : "failed to read project stats" },
-        502,
-      );
+      // Upstream (Cloudflare) detail stays in server-side logs only;
+      // clients get a generic error (audit F3).
+      console.error(`failed to read stats for project ${project.id}:`, cause);
+      return c.json({ error: "failed to read project stats" }, 502);
     }
   });
 
@@ -198,10 +244,9 @@ export function createApp(deps: AppDeps) {
       );
       return c.json({ snapshot });
     } catch (cause) {
-      return c.json(
-        { error: cause instanceof Error ? cause.message : "failed to snapshot project" },
-        502,
-      );
+      // Same rule as stats: detail server-side only (audit F3).
+      console.error(`failed to snapshot project ${project.id}:`, cause);
+      return c.json({ error: "failed to snapshot project" }, 502);
     }
   });
 
