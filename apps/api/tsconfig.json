@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "jsxImportSource": "hono/jsx",
+    "types": ["@cloudflare/workers-types", "node"]
+  },
+  "exclude": ["dist", "node_modules", "migrations"],
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "test", "drizzle.config.ts"]
+}

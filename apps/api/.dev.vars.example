@@ -1,0 +1,8 @@
+# Local development only — copy to .dev.vars (never commit .dev.vars).
+# Generate a key with: openssl rand -base64 32
+TOKEN_ENCRYPTION_KEY=replace-with-base64-32-byte-key
+# Local dev ONLY: lets api accept calls without Cloudflare Access.
+# NEVER set this in production.
+AUTHFLEET_DEV_BYPASS=1
+AUTHFLEET_DEV_OPERATOR=dev@local
+AUTHFLEET_DEMO=1

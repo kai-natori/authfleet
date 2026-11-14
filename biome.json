@@ -1,0 +1,21 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.3/schema.json",
+  "files": {
+    "ignoreUnknown": true,
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/.wrangler",
+      "!**/node_modules",
+      "!apps/web/src/routeTree.gen.ts",
+      "!apps/api/migrations"
+    ]
+  },
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "always", "trailingCommas": "all" }
+  },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } },
+  "css": { "parser": { "tailwindDirectives": true } },
+  "vcs": { "clientKind": "git", "enabled": true, "useIgnoreFile": true }
+}

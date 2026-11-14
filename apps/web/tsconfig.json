@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "jsx": "react-jsx",
+    "paths": { "~/*": ["./src/*"] },
+    "types": ["vite/client", "node"]
+  },
+  "extends": "../../tsconfig.base.json",
+  "include": ["src", "vite.config.ts", "worker.mjs"]
+}

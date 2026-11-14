@@ -1,0 +1,28 @@
+{
+  "dependencies": {
+    "ulid": "^3.0.2"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20251101.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5",
+    "@types/node": "^22.20.5"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "main": "./dist/index.js",
+  "name": "@authfleet/core",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.1.0"
+}
