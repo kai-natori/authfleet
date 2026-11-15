@@ -1,5 +1,7 @@
 # AuthFleet
 
+**English** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
+
 **One dashboard for all your Better Auth apps — self-hosted on Cloudflare.**
 
 Register several of your own Better Auth projects and switch between them
