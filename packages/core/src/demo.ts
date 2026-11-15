@@ -1,4 +1,4 @@
-import { dateString } from "./stats";
+import { DAY_MS, dateString } from "./stats";
 import type { DailySignup, ProjectRecord, SnapshotRecord, UserStats } from "./types";
 
 /**
@@ -41,7 +41,7 @@ export const DEMO_DAYS = 60;
 function demoDailySignups(now: Date): DailySignup[] {
   const days: DailySignup[] = [];
   for (let i = DEMO_DAYS - 1; i >= 0; i--) {
-    const date = dateString(new Date(now.getTime() - i * 86_400_000));
+    const date = dateString(new Date(now.getTime() - i * DAY_MS));
     const base = 14 + Math.round(seeded(`growth:${date}`) * 18) + (DEMO_DAYS - i) * 0.12;
     days.push({ date, count: Math.max(0, Math.round(base)) });
   }

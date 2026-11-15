@@ -39,16 +39,19 @@ export interface ProjectStatsResponse {
   summary: ProjectStatsSummary;
 }
 
+/** The Worker env object published per-request by worker.mjs. */
+function workerEnv(): Record<string, unknown> | undefined {
+  return globalThis.__AUTHFLEET_ENV__ as Record<string, unknown> | undefined;
+}
+
 function getApiBinding(): ApiBinding | null {
-  const env = globalThis.__AUTHFLEET_ENV__ as Record<string, unknown> | undefined;
-  const binding = env?.API as ApiBinding | undefined;
+  const binding = workerEnv()?.API as ApiBinding | undefined;
   return binding && typeof binding.fetch === "function" ? binding : null;
 }
 
 /** Read a config value from the Worker env (bindings/vars) or process env. */
 function serverEnv(name: string): string | undefined {
-  const env = globalThis.__AUTHFLEET_ENV__ as Record<string, unknown> | undefined;
-  const fromWorker = env?.[name];
+  const fromWorker = workerEnv()?.[name];
   if (typeof fromWorker === "string" && fromWorker.length > 0) return fromWorker;
   const fromProcess = process.env[name];
   return fromProcess && fromProcess.length > 0 ? fromProcess : undefined;

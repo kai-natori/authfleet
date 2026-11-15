@@ -55,15 +55,21 @@ export function projectTokenAad(projectId: string): string {
   return `authfleet:project-token:v1:${projectId}`;
 }
 
+const textEncoder = new TextEncoder();
+
+function aadBytes(aad: string): BufferSource {
+  return textEncoder.encode(aad) as BufferSource;
+}
+
 export async function encryptText(
   key: CryptoKey,
   plaintext: string,
   aad: string,
 ): Promise<EncryptedValue> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const encoded = new TextEncoder().encode(plaintext);
+  const encoded = textEncoder.encode(plaintext);
   const cipher = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(aad) as BufferSource },
+    { name: "AES-GCM", iv, additionalData: aadBytes(aad) },
     key,
     encoded,
   );
@@ -85,7 +91,7 @@ export async function decryptText(
     {
       name: "AES-GCM",
       iv: iv as BufferSource,
-      additionalData: new TextEncoder().encode(aad) as BufferSource,
+      additionalData: aadBytes(aad),
     },
     key,
     base64ToBytes(value.ciphertext) as BufferSource,

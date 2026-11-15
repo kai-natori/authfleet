@@ -1,12 +1,15 @@
 import type { DailySignup, SnapshotRecord, UserStats } from "./types";
 
+/** Milliseconds in one day; the unit for every window computation here. */
+export const DAY_MS = 86_400_000;
+
 export function dateString(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
 /** Sum signups whose date falls in the last `days` days, today included. */
 export function sumSignupWindow(daily: DailySignup[], days: number, now = new Date()): number {
-  const cutoff = dateString(new Date(now.getTime() - (days - 1) * 86_400_000));
+  const cutoff = dateString(new Date(now.getTime() - (days - 1) * DAY_MS));
   return daily.filter((d) => d.date >= cutoff).reduce((sum, d) => sum + d.count, 0);
 }
 
@@ -28,7 +31,7 @@ export function growthFromSnapshots(snapshots: SnapshotRecord[]): SnapshotGrowth
   const latest = sorted[sorted.length - 1];
   if (!first || !latest || first.date === latest.date) return null;
   const delta = latest.totalUsers - first.totalUsers;
-  const spanDays = Math.round((Date.parse(latest.date) - Date.parse(first.date)) / 86_400_000);
+  const spanDays = Math.round((Date.parse(latest.date) - Date.parse(first.date)) / DAY_MS);
   return {
     firstDate: first.date,
     latestDate: latest.date,

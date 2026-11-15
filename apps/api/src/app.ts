@@ -2,7 +2,6 @@ import {
   buildStatsSummary,
   DEMO_PROJECT_ID,
   dateString,
-  decryptText,
   demoProject,
   demoSnapshots,
   demoStats,
@@ -11,13 +10,13 @@ import {
   type ProjectRecord,
   type ProjectRepository,
   projectTokenAad,
-  RemoteD1Reader,
   tokenHint,
   toPublicProject,
   type UserStats,
 } from "@authfleet/core";
 import { Hono } from "hono";
 import { z } from "zod";
+import { createProjectReader, decryptProjectToken } from "./reader";
 
 /**
  * The api app. It is NOT a public API: in production the only caller is
@@ -81,11 +80,7 @@ const projectUpdateSchema = z.object({
 });
 
 function defaultReaderFactory(project: ProjectRecord, token: string): StatsReader {
-  return new RemoteD1Reader({
-    accountId: project.cfAccountId,
-    databaseId: project.d1DatabaseId,
-    token,
-  });
+  return createProjectReader(project, token);
 }
 
 export function createApp(deps: AppDeps) {
@@ -126,14 +121,7 @@ export function createApp(deps: AppDeps) {
 
   async function readerFor(project: ProjectRecord): Promise<StatsReader> {
     const key = await deps.getEncryptionKey();
-    const token = await decryptText(
-      key,
-      {
-        ciphertext: project.tokenCiphertext,
-        iv: project.tokenIv,
-      },
-      projectTokenAad(project.id),
-    );
+    const token = await decryptProjectToken(key, project);
     return readerFactory(project, token);
   }
 

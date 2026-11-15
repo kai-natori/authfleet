@@ -1,3 +1,4 @@
+import { DAY_MS } from "./stats";
 import type { DailySignup, UserStats } from "./types";
 
 /**
@@ -239,12 +240,12 @@ export class RemoteD1Reader {
       // Epoch: milliseconds are ~1e12, seconds ~1e9.
       const isMillis = sample > 1e11;
       const divisor = isMillis ? 1000 : 1;
-      const cutoffMs = now - days * 86_400_000;
+      const cutoffMs = now - days * DAY_MS;
       cutoff = isMillis ? cutoffMs : Math.floor(cutoffMs / 1000);
       sql = `SELECT date("${column}" / ${divisor}, 'unixepoch') AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
     } else {
       // ISO-ish text timestamps: lexicographic cutoff works.
-      cutoff = new Date(now - days * 86_400_000).toISOString().slice(0, 10);
+      cutoff = new Date(now - days * DAY_MS).toISOString().slice(0, 10);
       sql = `SELECT substr("${column}", 1, 10) AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
     }
     const rows = await this.query(sql, [cutoff]);

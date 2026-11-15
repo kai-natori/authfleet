@@ -1,14 +1,9 @@
-import {
-  decryptText,
-  importEncryptionKey,
-  projectTokenAad,
-  RemoteD1Reader,
-  runSnapshotJob,
-} from "@authfleet/core";
+import { importEncryptionKey, runSnapshotJob } from "@authfleet/core";
 import { drizzle } from "drizzle-orm/d1";
 import { type AppDeps, createApp } from "./app";
 import { DrizzleProjectRepository } from "./db/repo";
 import * as schema from "./db/schema";
+import { createProjectReader, decryptProjectToken } from "./reader";
 
 /**
  * Production wiring.
@@ -75,25 +70,12 @@ export default {
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const deps = buildDeps(env);
     const key = await deps.getEncryptionKey();
-    const repo = new DrizzleProjectRepository(drizzle(env.DB, { schema }));
     const results = await runSnapshotJob({
-      repo,
+      repo: deps.repo,
       readerFor: (project) => ({
         getTotalUsers: async () => {
-          const token = await decryptText(
-            key,
-            {
-              ciphertext: project.tokenCiphertext,
-              iv: project.tokenIv,
-            },
-            projectTokenAad(project.id),
-          );
-          const reader = new RemoteD1Reader({
-            accountId: project.cfAccountId,
-            databaseId: project.d1DatabaseId,
-            token,
-          });
-          const stats = await reader.getUserStats(1);
+          const token = await decryptProjectToken(key, project);
+          const stats = await createProjectReader(project, token).getUserStats(1);
           return stats.totalUsers;
         },
       }),
