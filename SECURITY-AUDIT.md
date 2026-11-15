@@ -410,3 +410,109 @@ millisecond are randomly ordered and the assertion can fail by chance
 (observed once during the fix verification run; the test passes in
 isolation). Untouched by these fixes; a monotonic factory or a
 relaxed assertion would settle it.
+
+---
+
+## Round 2 — 2026-11-15 (pre-publication)
+
+- **Scope:** the refactored tree after commit `8837905` ("refactor:
+  dedupe reader construction and day constants, monotonic ULIDs"),
+  audited before the repository is made public. Same areas as round 1
+  (crypto, operator gate + Access JWT verification, D1 reader surface,
+  registry data layer, wrangler/config, secrets hygiene) plus the new
+  code from the F1–F8 fixes and the refactor (`apps/web/src/server/
+  access.ts`, `apps/api/src/reader.ts`, monotonic ULIDs), plus a
+  pre-publication sweep of every tracked file.
+- **Method:** static audit + tracked-file scans (`git grep`) + full
+  test suite re-run. No live runs, no deploys.
+
+### Summary
+
+| Severity | Count |
+| -------- | ----- |
+| Critical | 0     |
+| High     | 0     |
+| Medium   | 0     |
+| Low      | 1     |
+
+### Findings
+
+#### R2-L1 — LOW: The operator's own product name used as an example in docs/UI
+
+**Evidence** — `README.md` (roadmap) used "how many users does
+twiceword have?" as the MCP example, and
+`apps/web/src/routes/projects.tsx` used `placeholder="twiceword"` for
+the project-name input. "twiceword" is the operator's private product
+name; harmless in itself, but a public OSS repository should use
+generic examples, and the placeholder would have shipped to every
+self-hoster's UI.
+
+**Fix — FIXED in this round.** README example now reads "how many
+users does my app have?"; the input placeholder is now "my-app".
+
+### Checked and clean (round 2)
+
+**Access JWT verification (`apps/web/src/server/access.ts`, new since
+round 1)** — RS256 only (any other `alg` rejected before key lookup);
+signature verified against the team JWKS with a 10-minute in-isolate
+cache and exactly one cache-bypassing refetch on unknown `kid`
+(rotation); issuer, audience (scalar or array), `exp` and `nbf` all
+checked; a JWT without an email claim is rejected. The operator email
+forwarded to the api comes only from these verified claims. Web no
+longer reads `Cf-Access-Authenticated-User-Email` anywhere (repo-wide
+grep). Partial Access configuration (only one of team domain / AUD
+set) is a hard error; with Access configured, a missing assertion
+throws — fail closed. Covered by 10 unit tests (generated RSA keypair,
+stubbed JWKS: valid, tampered, wrong aud/iss, expired, unknown kid,
+missing email, malformed, wrong alg).
+
+**Operator gate (api)** — email-shape check, case-insensitive
+allowlist with 403 for outsiders, dev bypass inert when Access is
+configured on the web side and unset in committed api config
+(`apps/api/wrangler.jsonc` commits no `vars` at all). The refactored
+`apps/api/src/reader.ts` (single decrypt-and-build path for HTTP and
+cron) logs nothing and returns tokens only as the reader's Bearer
+credential to the hard-coded Cloudflare host.
+
+**Crypto / ids after the refactor** — AES-GCM with per-project AAD and
+12-byte-IV enforcement unchanged; the shared `TextEncoder` extraction
+did not alter the wire format (existing transplant/wrong-key tests
+pass). `newId()` now uses the ULID monotonic factory: ids remain
+lowercase ULIDs used only for row ids, and the previously flaky
+ordering test is deterministic (core suite 10/10 repeat runs green).
+
+**Pre-publication sweep (all 73 tracked files)**
+
+- Personal identifiers: `git grep` for the operator's name, email,
+  iCloud address, Cloudflare account id, home-directory paths and
+  assistant name — **none found**.
+- Secret-shaped strings: only obvious test fixtures
+  (`cf-token-abcdef9999`, `super-secret-token`, `op@example.com`,
+  `0123456789abcdef…` account id, the RFC-example UUID
+  `123e4567-e89b-…`). No real credential, account id or database id is
+  tracked; the only UUID literal outside tests is Drizzle's internal
+  migration-snapshot id.
+- `.gitignore` covers `.dev.vars`, `.env*`, `dist/`, `.turbo/`,
+  `.wrangler/`; the single tracked example file
+  (`apps/api/.dev.vars.example`) contains placeholders only.
+- Wrangler configs: api `workers_dev: false` with no routes; web
+  `workers_dev: false` with the `API` service binding; registry
+  `database_id` in the api config is the all-zeros placeholder.
+- Dependency manifests: small, current direct set (hono ^4.13,
+  drizzle-orm ^0.45, zod ^4.6, ulid ^3, TanStack Start 1.169,
+  React 19.3), fully lockfile-pinned.
+
+### Unverified leads carried over
+
+1. **Dependency CVE status** — `pnpm audit` was attempted again in
+   this round; the registry audit endpoint is refused by this
+   environment's package-registry policy (`403 policy_denied`), so
+   vulnerability status remains unverified here. Run `pnpm audit` on
+   the operator's machine before tagging a release.
+2. **CSRF posture of web server functions** and **Workers Logs
+   content** — runtime properties, unchanged from round 1 §5; verify
+   on the operator's machine after the first real deployment.
+3. **Deployed reachability** — that the deployed web Worker is only
+   reachable on Access-covered hostnames remains a deployment fact to
+   confirm at deploy time (the shipped config now closes the
+   workers.dev path by construction).

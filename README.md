@@ -167,7 +167,7 @@ deploys in this order.)
   database — Postgres included — can install, so AuthFleet can read
   their counts through the app itself instead of only via D1.
 - `apps/mcp`: a read-only MCP server over the same core (ask your AI
-  "how many users does twiceword have?") — deferred from v1 by design.
+  "how many users does my app have?") — deferred from v1 by design.
 - One-command deploy for both Workers.
 - Optional write actions per project (ban/delete) behind explicit
   confirmation — only if demand appears; v1 is read-only by design.

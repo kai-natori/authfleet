@@ -108,7 +108,7 @@ function ProjectsPage() {
           <form className="grid gap-4" onSubmit={(e) => void onCreate(e)}>
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
-              <Input id="name" name="name" required placeholder="twiceword" />
+              <Input id="name" name="name" required placeholder="my-app" />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="cfAccountId">Cloudflare account ID</Label>
