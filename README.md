@@ -162,6 +162,10 @@ deploys in this order.)
 
 ## Roadmap
 
+- **Agent plugin (v2, specced in `openspec/changes/add-agent-plugin/`)**:
+  a read-only Better Auth plugin (`authfleet` on npm) that apps on any
+  database — Postgres included — can install, so AuthFleet can read
+  their counts through the app itself instead of only via D1.
 - `apps/mcp`: a read-only MCP server over the same core (ask your AI
   "how many users does twiceword have?") — deferred from v1 by design.
 - One-command deploy for both Workers.
