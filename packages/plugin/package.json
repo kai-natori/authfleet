@@ -29,7 +29,9 @@
   "peerDependencies": {
     "better-auth": ">=1.4 <2"
   },
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "repository": {
     "directory": "packages/plugin",
     "type": "git",
