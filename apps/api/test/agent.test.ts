@@ -227,6 +227,32 @@ describe("agent project stats + snapshots", () => {
   });
 });
 
+describe("plugin status surfacing", () => {
+  it("stats failures for agent projects expose the plugin status kind, never upstream detail", async () => {
+    const deps = testDeps({
+      readerFactory: () => ({
+        getUserStats: async () => {
+          throw new AgentReadError("not-found", "plugin not found at this base URL", {
+            detail: "HTTP 404 from /authfleet/stats at https://internal.example.com",
+          });
+        },
+      }),
+    });
+    const app = createApp(deps);
+    const created = await app.request("/api/projects", {
+      method: "POST",
+      headers: OPERATOR,
+      body: JSON.stringify(agentPayload()),
+    });
+    const { project } = (await created.json()) as { project: { id: string } };
+    const res = await app.request(`/api/projects/${project.id}/stats`, { headers: OPERATOR });
+    expect(res.status).toBe(502);
+    const body = (await res.json()) as { error: string; pluginStatus?: string };
+    expect(body.pluginStatus).toBe("not-found");
+    expect(JSON.stringify(body)).not.toContain("internal.example.com");
+  });
+});
+
 describe("reader construction branches on project type", () => {
   it("builds HttpAgentReader for agent projects and RemoteD1Reader for d1", async () => {
     const deps = testDeps();

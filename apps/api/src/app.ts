@@ -349,9 +349,16 @@ export function createApp(deps: AppDeps) {
         summary: buildStatsSummary(stats, snapshots),
       });
     } catch (cause) {
-      // Upstream (Cloudflare) detail stays in server-side logs only;
-      // clients get a generic error (audit F3).
+      // Upstream detail stays in server-side logs only; clients get a
+      // generic error (audit F3). One exception, by design: for agent
+      // projects the AgentReadError KIND (AuthFleet's own taxonomy —
+      // not-found / unreachable / version-mismatch / …) is returned as
+      // `pluginStatus` so the dashboard can show first-class plugin
+      // states instead of conflating them with a zero-user project.
       console.error(`failed to read stats for project ${project.id}:`, cause);
+      if (project.type === "agent" && cause instanceof AgentReadError) {
+        return c.json({ error: "failed to read project stats", pluginStatus: cause.kind }, 502);
+      }
       return c.json({ error: "failed to read project stats" }, 502);
     }
   });

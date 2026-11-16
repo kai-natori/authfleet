@@ -1,5 +1,6 @@
-import type { ProjectStatsSummary, PublicProject } from "@authfleet/core";
+import { generateRandomToken, type ProjectStatsSummary, type PublicProject } from "@authfleet/core";
 import { createServerFn, createServerOnlyFn } from "@tanstack/react-start";
+import { isPluginStatus, type PluginStatus } from "../lib/plugin-status";
 
 /**
  * Server-side client for the AuthFleet api Worker.
@@ -102,11 +103,18 @@ export const callApi = createServerOnlyFn(
       response = await fetch(`${base}${path}`, { ...init, headers });
     }
     const body = (await response.json().catch(() => null)) as
-      | (T & { error?: string })
-      | { error?: string }
+      | (T & { error?: string; pluginStatus?: unknown })
+      | { error?: string; pluginStatus?: unknown }
       | null;
     if (!response.ok) {
-      throw new Error(body?.error ?? `AuthFleet api error: HTTP ${response.status}`);
+      const error = new Error(body?.error ?? `AuthFleet api error: HTTP ${response.status}`);
+      // Agent-project stats failures carry the plugin status kind so
+      // callers can render first-class plugin states (see
+      // ../lib/plugin-status). Anything unrecognized is dropped.
+      if (isPluginStatus(body?.pluginStatus)) {
+        (error as Error & { pluginStatus?: PluginStatus }).pluginStatus = body.pluginStatus;
+      }
+      throw error;
     }
     return body as T;
   },
@@ -127,19 +135,65 @@ export const getOperatorFn = createServerFn({ method: "GET" }).handler(
   }),
 );
 
+/**
+ * Stats as a result union: agent-plugin failure states are data, not
+ * exceptions, so the dashboard can render them distinctly (and never
+ * as a zero-user project). Non-plugin failures keep a null status.
+ */
+export type ProjectStatsResult =
+  | { ok: true; data: ProjectStatsResponse }
+  | { ok: false; pluginStatus: PluginStatus | null; error: string };
+
 export const getProjectStatsFn = createServerFn({ method: "GET" })
   .validator((projectId: string) => projectId)
-  .handler(
-    async ({ data }): Promise<ProjectStatsResponse> =>
-      callApi<ProjectStatsResponse>(`/api/projects/${encodeURIComponent(data)}/stats`),
-  );
+  .handler(async ({ data }): Promise<ProjectStatsResult> => {
+    try {
+      const response = await callApi<ProjectStatsResponse>(
+        `/api/projects/${encodeURIComponent(data)}/stats`,
+      );
+      return { ok: true, data: response };
+    } catch (cause) {
+      const pluginStatus = (cause as { pluginStatus?: unknown })?.pluginStatus;
+      return {
+        ok: false,
+        pluginStatus: isPluginStatus(pluginStatus) ? pluginStatus : null,
+        error: cause instanceof Error ? cause.message : "failed to read project stats",
+      };
+    }
+  });
 
-export interface CreateProjectInput {
-  name: string;
-  cfAccountId: string;
-  d1DatabaseId: string;
-  token: string;
+export type CreateProjectInput =
+  | {
+      type: "d1";
+      name: string;
+      cfAccountId: string;
+      d1DatabaseId: string;
+      token: string;
+    }
+  | {
+      type: "agent";
+      name: string;
+      baseUrl: string;
+      apiKey: string;
+    };
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
+
+/**
+ * Generate a fresh plugin API key for the registration form. The key
+ * itself is shown ONCE in the form (and then stored encrypted by the
+ * api at registration); the hash is what the operator pastes into the
+ * target app's config as AUTHFLEET_API_KEY_HASH.
+ */
+export const generateAgentKeyFn = createServerFn({ method: "POST" }).handler(
+  async (): Promise<{ apiKey: string; apiKeyHash: string }> => {
+    const apiKey = generateRandomToken(32);
+    return { apiKey, apiKeyHash: await sha256Hex(apiKey) };
+  },
+);
 
 export const createProjectFn = createServerFn({ method: "POST" })
   .validator((input: CreateProjectInput) => input)

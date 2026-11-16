@@ -89,16 +89,16 @@
 
 ## 6. Web (apps/web)
 
-- [ ] Add-project form: project-type selector; `d1` fields (account
+- [x] Add-project form: project-type selector; `d1` fields (account
   id, database id, Cloudflare token) vs. `agent` fields (base URL,
   API key) with per-type help text and the plugin install snippet
-- [ ] Registration flow for `agent`: offer a generated API key (shown
+- [x] Registration flow for `agent`: offer a generated API key (shown
   once) plus its SHA-256 hash to paste into the app config
-- [ ] Project list + switcher: type badge (`D1` / `Plugin`)
-- [ ] Plugin status states on list and detail: not found /
+- [x] Project list + switcher: type badge (`D1` / `Plugin`)
+- [x] Plugin status states on list and detail: not found /
   unreachable / version mismatch shown distinctly from real stats
   and from a genuine zero-user project
-- [ ] Existing `d1` flows unchanged
+- [x] Existing `d1` flows unchanged
 
 ## 7. Docs
 

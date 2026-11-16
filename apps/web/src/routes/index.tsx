@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import { pluginStatusInfo } from "~/lib/plugin-status";
 import { getOperatorFn, getProjectStatsFn, listProjectsFn } from "~/server/api";
 
 export const Route = createFileRoute("/")({
@@ -20,7 +21,13 @@ export const Route = createFileRoute("/")({
     const [{ projects }, { operator }] = await Promise.all([listProjectsFn(), getOperatorFn()]);
     const selected = projects.find((p) => p.id === deps.project) ?? projects[0];
     const stats = selected ? await getProjectStatsFn({ data: selected.id }) : null;
-    return { projects, operator: operator ?? "unknown", selectedId: selected?.id, stats };
+    return {
+      projects,
+      operator: operator ?? "unknown",
+      selectedId: selected?.id,
+      selectedType: selected?.type,
+      stats,
+    };
   },
   component: DashboardPage,
 });
@@ -40,7 +47,7 @@ function StatCard(props: { title: string; value: string; description?: string })
 }
 
 function DashboardPage() {
-  const { projects, operator, selectedId, stats } = Route.useLoaderData();
+  const { projects, operator, selectedId, selectedType, stats } = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
 
   if (projects.length === 0) {
@@ -58,7 +65,7 @@ function DashboardPage() {
     );
   }
 
-  const summary = stats?.summary;
+  const summary = stats?.ok ? stats.data.summary : undefined;
   const growth = summary?.growth;
 
   return (
@@ -83,12 +90,29 @@ function DashboardPage() {
             {projects.map((project) => (
               <SelectItem key={project.id} value={project.id}>
                 {project.name}
+                {project.type === "agent" ? " · Plugin" : ""}
                 {project.isDemo ? " (demo)" : ""}
               </SelectItem>
             ))}
           </SelectContent>
         </Select>
       </div>
+
+      {stats && !stats.ok ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              {stats.pluginStatus
+                ? pluginStatusInfo(stats.pluginStatus).label
+                : "Could not load statistics"}
+              {selectedType === "agent" ? <Badge variant="outline">Plugin</Badge> : null}
+            </CardTitle>
+            <CardDescription>
+              {stats.pluginStatus ? pluginStatusInfo(stats.pluginStatus).description : stats.error}
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      ) : null}
 
       {summary ? (
         <>
@@ -165,7 +189,7 @@ function DashboardPage() {
               </div>
               <p className="mt-4 text-xs text-muted-foreground">
                 Stats read live at {new Date(summary.stats.asOf).toLocaleString()}.
-                {stats.project.isDemo ? (
+                {stats?.ok && stats.data.project.isDemo ? (
                   <>
                     {" "}
                     <Badge variant="secondary">demo data</Badge>
