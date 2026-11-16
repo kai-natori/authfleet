@@ -1,0 +1,23 @@
+{
+  "dependencies": {
+    "@authfleet/core": "workspace:*",
+    "@hono/node-server": "^1.19.19",
+    "authfleet": "workspace:*",
+    "better-auth": "1.7.25",
+    "hono": "^4.13.13"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  },
+  "name": "@authfleet/test-e2e",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "type": "module",
+  "version": "0.0.0"
+}
