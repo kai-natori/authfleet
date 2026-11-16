@@ -112,15 +112,15 @@
 
 ## 8. Security audit round 2 (gates first npm publish)
 
-- [ ] Audit the plugin package: auth check (hash comparison, timing),
+- [x] Audit the plugin package: auth check (hash comparison, timing),
   no-bypass, no logging of key material, no PII in responses, no DB
   writes, failure behaviour on misconfiguration
-- [ ] Audit the new dashboard-side surface: `HttpAgentReader` (SSRF
+- [x] Audit the new dashboard-side surface: `HttpAgentReader` (SSRF
   surface of operator-supplied base URLs, error leakage), registry
   type branching, key generation/storage for `agent` projects
-- [ ] Findings written to `SECURITY-AUDIT.md` (round 2 section) and
+- [x] Findings written to `SECURITY-AUDIT.md` (round 2 section) and
   fixes applied before the plugin is published to npm
-- [ ] Unit tests / typecheck / lint / build run and recorded
+- [x] Unit tests / typecheck / lint / build run and recorded
 - [ ] Runtime verification on the operator's Mac (fixture app +
   dashboard against a real non-D1 project) — by design not done in
   CI/sandbox

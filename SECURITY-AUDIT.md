@@ -516,3 +516,184 @@ ordering test is deterministic (core suite 10/10 repeat runs green).
    reachable on Access-covered hostnames remains a deployment fact to
    confirm at deploy time (the shipped config now closes the
    workers.dev path by construction).
+
+## Plugin audit — 2026-11-16 (add-agent-plugin, tasks group 8)
+
+- **Scope:** the agent-plugin surface added by the `add-agent-plugin`
+  change (commits `172d6f7`…`4b5e11c`): `packages/plugin` (endpoint
+  auth, counts-only invariant, bucketing cap, factory behaviour),
+  `packages/core` `HttpAgentReader` (SSRF surface of operator-supplied
+  base URLs, error discipline), `apps/api` agent registration and
+  update paths, `apps/web` key generation and plugin-status rendering.
+  This round **gates the first npm publish** of the `authfleet`
+  package.
+- **Method:** static audit of the plugin/core/api/web sources +
+  targeted `git grep` scans (logging, Authorization handling, secret
+  shapes, personal identifiers across all 101 tracked files) + fixes
+  with regression tests + full suite re-run. No live runs, no deploys.
+
+### Summary
+
+| Severity | Count |
+| -------- | ----- |
+| Critical | 0     |
+| High     | 0     |
+| Medium   | 0     |
+| Low      | 3 (all fixed in this round) |
+
+### Findings
+
+#### PA1 — LOW: `HttpAgentReader` followed HTTP redirects
+
+**Evidence** — `packages/core/src/agent-reader.ts` called `fetch`
+with the default redirect mode. Registration validates the base URL
+the operator typed (HTTPS-only, no credentials), but a stats-time
+3xx could silently retarget the dashboard's request to an origin
+nobody validated — broadening the SSRF surface beyond the validated
+URL and letting a compromised target app steer the reader. (Impact
+is bounded: the Fetch spec strips `Authorization` on cross-origin
+redirects, the deployment is single-operator, and Cloudflare Workers
+egress blocks private ranges — hence Low, not Medium.)
+
+**Fix — FIXED in this round.** Requests now use
+`redirect: "manual"`, and any 3xx response is mapped to the typed
+`upstream` error with the status kept in server-side `detail` only.
+Regression test: a stubbed 302 toward a link-local address produces
+exactly one request (issued with `redirect: "manual"`) and an
+`upstream` error.
+
+#### PA2 — LOW: PATCH updated agent connection settings without the pre-save plugin check
+
+**Evidence** — `POST /api/projects` runs `GET /authfleet/validate`
+before saving an `agent` project, but `PATCH /api/projects/:id`
+accepted a new `baseUrl` and/or `apiKey` and stored them with no
+plugin check at all — a validate-before-save bypass on the update
+path. (The check is a typo/consistency guard for a single trusted
+operator, not a trust boundary — hence Low.)
+
+**Fix — FIXED in this round.** When a PATCH changes `baseUrl` or
+`apiKey`, the api validates the *effective* pair first — a URL-only
+change is checked against the stored (decrypted) key, a key-only
+change against the stored URL — and a failed check returns 400 and
+leaves the project untouched. Name-only updates skip the check.
+Regression test covers URL-only failure, key-only failure, stored
+record unchanged, and name-only success.
+
+#### PA3 — LOW: Base URLs with a query string or fragment were accepted
+
+**Evidence** — `normalizeAgentBaseUrl` rejected embedded credentials
+but accepted `https://app.example.com/api/auth?x=1#frag`. Endpoint
+URLs are built by string concatenation (`{baseUrl}/authfleet/stats`),
+so the query/fragment landed mid-URL and corrupted every request —
+a configuration-time footgun, silently stored.
+
+**Fix — FIXED in this round.** The normaliser now rejects base URLs
+carrying a query string or fragment. Regression tests cover both.
+
+### Checked and clean (plugin audit)
+
+**Plugin endpoint auth (`packages/plugin/src/auth.ts`)** — the
+plugin stores only the hex SHA-256 of the project key; a presented
+Bearer key is hashed and the two fixed-length (32-byte) digests are
+compared by a full-length, no-early-exit loop. Both inputs to the
+comparison are always well-formed digests (the configured hash is
+validated at init; the presented side is a fresh SHA-256), so no
+malformed-hex path is reachable. Missing header, wrong scheme and
+wrong key all collapse to the same generic `APIError("UNAUTHORIZED",
+{ message: "unauthorized" })`. The check runs twice by design — once
+as namespace middleware, once inside each handler — so it does not
+depend on router middleware matching. No code path in the package
+logs: repo-wide grep finds no `console.*` in `packages/plugin/src`,
+and the factory's throw messages never interpolate the configured
+hash or any presented key.
+
+**Counts-only / PII invariant (plugin)** — by construction, not by
+filtering: `computeStats` issues only adapter `count()` calls plus
+one `findMany` with `select: ["createdAt"]`, and the response object
+is assembled from exactly `{ version, totalUsers, anonymousUsers,
+dailySignups, asOf }`. There is no code path that can place a user
+row, email or id in a response; the contract suite's PII test
+asserts this against the fixture app. The plugin performs no adapter
+writes anywhere.
+
+**Bucketing cap and degradation (`packages/plugin/src/stats.ts`)** —
+daily buckets are computed only when the window count is
+`0 < n ≤ STATS_ROW_CAP (10,000)`; above the cap the response degrades
+to totals-only (`dailySignups: []`) with totals still exact, and no
+`findMany` is issued. A second guard (`rows.length === windowCount`)
+degrades the same way if an adapter silently caps `limit`, so
+partial buckets can never be presented as complete. `count()` calls
+are aggregates and stay exact at any table size.
+
+**Factory fail-loud behaviour** — `authfleet()` throws synchronously
+at `betterAuth()` construction when no hash is configured (option or
+`AUTHFLEET_API_KEY_HASH`) or when the hash is not 64 lowercase hex
+characters; a misconfigured plugin fails startup instead of serving
+permanently-401 or unprotected endpoints. Anonymous-flag detection
+failure resolves to `anonymousUsers: null`, never a fabricated zero.
+
+**`HttpAgentReader` URL policy (beyond PA1/PA3)** — HTTPS-only with
+an http exception for exactly `localhost` / `127.0.0.1` / `[::1]`;
+the WHATWG parser normalises hex/octal IPv4 and compressed IPv6
+spellings before the comparison, so those aliases cannot smuggle a
+loopback past the check (`localhost.` with a trailing dot does not
+match and stays HTTPS-only). Accepted residual, by design: an HTTPS
+hostname that *resolves* to a private address is not blocked — the
+base URL is operator-supplied in a single-operator deployment, the
+credential travels only to that origin over TLS, and Workers egress
+blocks private ranges in the deployed topology. Error discipline
+(F3) re-verified: plugin response bodies are never forwarded;
+`detail` carries only status codes, paths and fetch causes — never
+the API key or the Authorization header.
+
+**Api registry (agent branch)** — key length ≥32 enforced
+server-side by zod on both create and PATCH (after trimming, so
+whitespace padding cannot fake length); creation validates before
+saving and stores nothing on failure; the API key is encrypted with
+the same AES-GCM + AAD scheme as D1 tokens (`projectTokenAad(id)`)
+and is write-only — responses expose only the last-4 `tokenHint`
+(asserted by tests, including after rotation). PATCH rejects
+foreign-type fields (`token` / `cfAccountId` / `d1DatabaseId` on an
+agent project, `apiKey` / `baseUrl` on a d1 project) and type
+changes outright; unknown create types are a 400. Error strings for
+plugin-check failures are fixed templates per `AgentReadError` kind;
+the version-mismatch branch interpolates only AuthFleet's own
+generic message, never an upstream body.
+
+**Web key generation and plugin states** — `generateAgentKeyFn`
+mints the key with `generateRandomToken(32)` (CSPRNG, base64url,
+43 chars) and returns `{ apiKey, apiKeyHash }` to the operator's
+browser exactly once; the web Worker never persists or logs it (no
+`console.*` in `apps/web/src/server`), and storage happens only in
+the api, encrypted, at registration. Like every dashboard server
+function it sits behind the Access gate from round 1 (F1). Stats
+failures reach the UI as the `ok: false` result union carrying a
+whitelisted `pluginStatus` kind (`isPluginStatus` drops anything
+unrecognised); a failure state is structurally incapable of
+rendering as a zero-user project, which only a successful response
+with `totalUsers: 0` can produce.
+
+**Pre-push sweep (all 101 tracked files)** — `git grep` for private
+keys, GitHub/npm/cloud token shapes, the operator's real email,
+Cloudflare account id, personal domains and home paths: **none
+found**. The only secret-shaped strings are the known test fixtures.
+`packages/plugin/dist/` is gitignored; the npm tarball contents were
+verified separately with `npm pack --dry-run` (see the release-prep
+commit).
+
+### Verification (plugin audit round)
+
+- Tests: **106 passed** — core 37, plugin 23, api 28, web 13,
+  test-ba14 5 (baseline 103 + 3 new regression tests for PA1–PA3).
+- Typecheck 7/7, lint clean (biome, 91 files), build 5/5,
+  `openspec validate` strict passes for both changes.
+
+### Unverified leads (plugin audit)
+
+1. **Runtime verification on the operator's Mac** — the fixture app
+   plus dashboard against a real non-D1 project (tasks group 8, last
+   item) is by design not run in the sandbox; it remains open and is
+   the one group-8 item left unchecked.
+2. **Dependency CVE status** — unchanged from round 2: `pnpm audit`
+   is refused by this environment's registry policy; run it on the
+   operator's machine before publishing.
