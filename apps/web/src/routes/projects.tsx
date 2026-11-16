@@ -13,7 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "~/components/ui/select";
+import { Separator } from "~/components/ui/separator";
 import { type PluginStatus, pluginStatusInfo } from "~/lib/plugin-status";
+import { cn } from "~/lib/utils";
 import {
   type CreateProjectInput,
   createProjectFn,
@@ -144,6 +146,16 @@ function ProjectsPage() {
               <CardHeader className="flex flex-row items-start justify-between gap-4">
                 <div>
                   <CardTitle className="flex items-center gap-2">
+                    <span
+                      className={cn(
+                        "size-2 shrink-0 rounded-full",
+                        project.type === "d1"
+                          ? "bg-sky-500"
+                          : health === "healthy"
+                            ? "bg-emerald-500"
+                            : "bg-destructive",
+                      )}
+                    />
                     {project.name}
                     <Badge variant="outline">{project.type === "agent" ? "Plugin" : "D1"}</Badge>
                     {project.isDemo ? <Badge variant="secondary">demo</Badge> : null}
@@ -197,7 +209,7 @@ function ProjectsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form className="grid gap-4" onSubmit={(e) => void onCreate(e)}>
+          <form className="grid gap-5" onSubmit={(e) => void onCreate(e)}>
             <div className="grid gap-2">
               <Label htmlFor="name">Name</Label>
               <Input id="name" name="name" required placeholder="my-app" />
@@ -219,6 +231,8 @@ function ProjectsPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            <Separator />
 
             {projectType === "d1" ? (
               <>
@@ -277,7 +291,7 @@ function ProjectsPage() {
                   </p>
                 </div>
                 {generated ? (
-                  <div className="grid gap-2 rounded-md border p-3 text-sm">
+                  <div className="grid gap-2 rounded-lg border bg-muted/50 p-4 text-sm">
                     <p className="font-medium">
                       Your generated key (already filled in above — shown only in this form):
                     </p>
@@ -289,7 +303,7 @@ function ProjectsPage() {
                     <code className="break-all">AUTHFLEET_API_KEY_HASH={generated.apiKeyHash}</code>
                   </div>
                 ) : null}
-                <div className="grid gap-2 rounded-md border p-3 text-sm">
+                <div className="grid gap-2 rounded-lg border bg-muted/50 p-4 text-sm">
                   <p className="font-medium">Install the plugin in the target app:</p>
                   <code>npm install authfleet</code>
                   <pre className="overflow-x-auto whitespace-pre-wrap">{PLUGIN_SNIPPET}</pre>
