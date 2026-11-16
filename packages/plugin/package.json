@@ -1,0 +1,47 @@
+{
+  "description": "AuthFleet agent plugin for Better Auth: read-only, counts-only user statistics endpoints for the self-hosted AuthFleet dashboard.",
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "better-auth": "1.7.25",
+    "typescript": "5.9.3",
+    "vitest": "5.0.5"
+  },
+  "exports": {
+    ".": {
+      "default": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "homepage": "https://github.com/kai-natori/authfleet",
+  "keywords": [
+    "better-auth",
+    "authfleet",
+    "analytics",
+    "dashboard",
+    "plugin"
+  ],
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "name": "authfleet",
+  "peerDependencies": {
+    "better-auth": ">=1.4 <2"
+  },
+  "private": true,
+  "repository": {
+    "directory": "packages/plugin",
+    "type": "git",
+    "url": "git+https://github.com/kai-natori/authfleet.git"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "sideEffects": false,
+  "type": "module",
+  "types": "./dist/index.d.ts",
+  "version": "0.1.0"
+}

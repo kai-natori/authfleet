@@ -22,20 +22,20 @@
 
 ## 2. Plugin package (packages/plugin)
 
-- [ ] Package scaffold: name `authfleet`, Better Auth peer dependency
+- [x] Package scaffold: name `authfleet`, Better Auth peer dependency
   `>=1.4 <2`, build + typecheck + lint wired into turbo
-- [ ] `authfleet(options)` factory: `apiKeyHash` from options, falling
+- [x] `authfleet(options)` factory: `apiKeyHash` from options, falling
   back to `AUTHFLEET_API_KEY_HASH`; missing hash fails at init
-- [ ] `GET /authfleet/validate` → `{ ok: true, version: 1 }`, no data
-- [ ] `GET /authfleet/stats` → v1 `UserStats` shape + `version`,
+- [x] `GET /authfleet/validate` → `{ ok: true, version: 1 }`, no data
+- [x] `GET /authfleet/stats` → v1 `UserStats` shape + `version`,
   `days` param (default 30, clamped to 90), counts only
-- [ ] Bearer-key check on all endpoints: SHA-256 of the presented key,
+- [x] Bearer-key check on all endpoints: SHA-256 of the presented key,
   timing-safe comparison against the configured hash, generic 401
-- [ ] Stats computed through the app's Better Auth DB adapter (user
+- [x] Stats computed through the app's Better Auth DB adapter (user
   model as resolved by Better Auth); anonymous split or `null`
-- [ ] No logging of the key or `Authorization` header; no dev bypass;
+- [x] No logging of the key or `Authorization` header; no dev bypass;
   no writes to the host app's database
-- [ ] Package README: install, config, key generation, threat notes
+- [x] Package README: install, config, key generation, threat notes
   (attack surface, counts-only promise)
 
 ## 3. Contract tests + fixture app
