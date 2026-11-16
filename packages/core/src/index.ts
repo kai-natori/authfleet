@@ -49,6 +49,7 @@ export {
   type DailySignup,
   type ProjectRecord,
   type ProjectRepository,
+  type ProjectType,
   type PublicProject,
   type SnapshotRecord,
   toPublicProject,

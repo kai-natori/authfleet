@@ -69,21 +69,21 @@
 
 ## 5. Registry + API (apps/api)
 
-- [ ] Migration: `projects.type` (`'d1' | 'agent'`, backfill `'d1'`)
+- [x] Migration: `projects.type` (`'d1' | 'agent'`, backfill `'d1'`)
   and nullable `baseUrl`; `cfAccountId` / `d1DatabaseId` become
   nullable for `agent` rows
-- [ ] Core registry types updated (`ProjectRecord`, `PublicProject`,
+- [x] Core registry types updated (`ProjectRecord`, `PublicProject`,
   create/update data): `type` + `baseUrl` exposed, per-type fields
   omitted when not applicable; credential columns and AES-GCM + AAD
   encryption reused unchanged
-- [ ] Creation/update validation branches on type: `d1` keeps v1
+- [x] Creation/update validation branches on type: `d1` keeps v1
   format rules; `agent` requires https base URL (localhost exception
   in dev) and an API key of ≥32 characters
-- [ ] `agent` registration performs `GET /authfleet/validate` before
+- [x] `agent` registration performs `GET /authfleet/validate` before
   saving; failure returns a specific registration error
-- [ ] Reader construction branches on project type in the stats
+- [x] Reader construction branches on project type in the stats
   routes and the snapshot job; snapshot behaviour unchanged
-- [ ] API tests: registry CRUD for both types, key write-only (only
+- [x] API tests: registry CRUD for both types, key write-only (only
   last-4 hint returned), stats for an `agent` project via a stubbed
   reader, snapshot job over mixed-type projects
 

@@ -7,9 +7,15 @@ import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core
  */
 export const projects = sqliteTable("projects", {
   id: text("id").primaryKey(),
+  /** Connection model: `d1` (pull) or `agent` (in-app plugin). */
+  type: text("type").notNull().default("d1"),
   name: text("name").notNull(),
-  cfAccountId: text("cf_account_id").notNull(),
-  d1DatabaseId: text("d1_database_id").notNull(),
+  /** `d1` projects only; null for `agent`. */
+  cfAccountId: text("cf_account_id"),
+  /** `d1` projects only; null for `agent`. */
+  d1DatabaseId: text("d1_database_id"),
+  /** `agent` projects only: the target app's Better Auth base URL. */
+  baseUrl: text("base_url"),
   tokenCiphertext: text("token_ciphertext").notNull(),
   tokenIv: text("token_iv").notNull(),
   tokenHint: text("token_hint").notNull(),

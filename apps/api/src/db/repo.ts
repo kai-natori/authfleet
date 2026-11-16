@@ -16,9 +16,11 @@ type DB = DrizzleD1Database<typeof schema>;
 function toProjectRecord(row: typeof projects.$inferSelect): ProjectRecord {
   return {
     id: row.id,
+    type: row.type === "agent" ? "agent" : "d1",
     name: row.name,
     cfAccountId: row.cfAccountId,
     d1DatabaseId: row.d1DatabaseId,
+    baseUrl: row.baseUrl,
     tokenCiphertext: row.tokenCiphertext,
     tokenIv: row.tokenIv,
     tokenHint: row.tokenHint,
@@ -60,9 +62,11 @@ export class DrizzleProjectRepository implements ProjectRepository {
     const now = new Date().toISOString();
     const row = {
       id: data.id ?? newId(),
+      type: data.type,
       name: data.name,
       cfAccountId: data.cfAccountId,
       d1DatabaseId: data.d1DatabaseId,
+      baseUrl: data.baseUrl,
       tokenCiphertext: data.tokenCiphertext,
       tokenIv: data.tokenIv,
       tokenHint: data.tokenHint,
@@ -79,6 +83,7 @@ export class DrizzleProjectRepository implements ProjectRepository {
     if (data.name !== undefined) patch.name = data.name;
     if (data.cfAccountId !== undefined) patch.cfAccountId = data.cfAccountId;
     if (data.d1DatabaseId !== undefined) patch.d1DatabaseId = data.d1DatabaseId;
+    if (data.baseUrl !== undefined) patch.baseUrl = data.baseUrl;
     if (data.tokenCiphertext !== undefined) patch.tokenCiphertext = data.tokenCiphertext;
     if (data.tokenIv !== undefined) patch.tokenIv = data.tokenIv;
     if (data.tokenHint !== undefined) patch.tokenHint = data.tokenHint;

@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { type AppDeps, createApp } from "./app";
 import { DrizzleProjectRepository } from "./db/repo";
 import * as schema from "./db/schema";
-import { createProjectReader, decryptProjectToken } from "./reader";
+import { createProjectReader, decryptProjectCredential } from "./reader";
 
 /**
  * Production wiring.
@@ -74,8 +74,8 @@ export default {
       repo: deps.repo,
       readerFor: (project) => ({
         getTotalUsers: async () => {
-          const token = await decryptProjectToken(key, project);
-          const stats = await createProjectReader(project, token).getUserStats(1);
+          const credential = await decryptProjectCredential(key, project);
+          const stats = await createProjectReader(project, credential).getUserStats(1);
           return stats.totalUsers;
         },
       }),

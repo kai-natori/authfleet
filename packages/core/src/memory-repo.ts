@@ -24,9 +24,11 @@ export class InMemoryProjectRepository implements ProjectRepository {
     const now = new Date().toISOString();
     const record: ProjectRecord = {
       id: data.id ?? newId(),
+      type: data.type,
       name: data.name,
       cfAccountId: data.cfAccountId,
       d1DatabaseId: data.d1DatabaseId,
+      baseUrl: data.baseUrl,
       tokenCiphertext: data.tokenCiphertext,
       tokenIv: data.tokenIv,
       tokenHint: data.tokenHint,

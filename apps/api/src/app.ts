@@ -1,4 +1,5 @@
 import {
+  AgentReadError,
   buildStatsSummary,
   DEMO_PROJECT_ID,
   dateString,
@@ -6,17 +7,19 @@ import {
   demoSnapshots,
   demoStats,
   encryptText,
+  HttpAgentReader,
   newId,
+  normalizeAgentBaseUrl,
   type ProjectRecord,
   type ProjectRepository,
+  type ProjectStatsReader,
   projectTokenAad,
   tokenHint,
   toPublicProject,
-  type UserStats,
 } from "@authfleet/core";
 import { Hono } from "hono";
 import { z } from "zod";
-import { createProjectReader, decryptProjectToken } from "./reader";
+import { createProjectReader, decryptProjectCredential } from "./reader";
 
 /**
  * The api app. It is NOT a public API: in production the only caller is
@@ -25,10 +28,6 @@ import { createProjectReader, decryptProjectToken } from "./reader";
  * web in `x-authfleet-operator` (the Cloudflare Access email). The dev
  * bypass below exists for local development only.
  */
-
-export interface StatsReader {
-  getUserStats(days?: number): Promise<UserStats>;
-}
 
 export interface AppDeps {
   repo: ProjectRepository;
@@ -44,8 +43,14 @@ export interface AppDeps {
    * presence-only (and production wiring logs a warning) — set it.
    */
   operatorEmails?: string[];
-  /** Injectable for tests; defaults to the real remote D1 reader. */
-  readerFactory?: (project: ProjectRecord, token: string) => StatsReader;
+  /** Injectable for tests; defaults to the per-type reader factory. */
+  readerFactory?: (project: ProjectRecord, credential: string) => ProjectStatsReader;
+  /**
+   * Injectable for tests; defaults to a real HttpAgentReader
+   * `/authfleet/validate` call. Runs BEFORE an `agent` project is
+   * saved, so a typo'd URL or key fails at registration time.
+   */
+  agentValidate?: (baseUrl: string, apiKey: string) => Promise<{ version: number }>;
 }
 
 type Variables = { operator: string };
@@ -65,26 +70,88 @@ const d1DatabaseIdSchema = z
     "d1DatabaseId must be a UUID",
   );
 
-const projectCreateSchema = z.object({
-  name: z.string().trim().min(1).max(120),
+const nameSchema = z.string().trim().min(1).max(120);
+
+/** `d1` registration: Cloudflare account/database ids + read-only token. */
+const d1CreateSchema = z.object({
+  name: nameSchema,
   cfAccountId: cfAccountIdSchema,
   d1DatabaseId: d1DatabaseIdSchema,
   token: z.string().trim().min(8).max(512),
 });
 
-const projectUpdateSchema = z.object({
-  name: z.string().trim().min(1).max(120).optional(),
+/** `agent` registration: the app's Better Auth base URL + plugin API key. */
+const agentCreateSchema = z.object({
+  name: nameSchema,
+  baseUrl: z.string().trim().min(1).max(2048),
+  apiKey: z.string().trim().min(32).max(512),
+});
+
+const d1UpdateSchema = z.object({
+  name: nameSchema.optional(),
   cfAccountId: cfAccountIdSchema.optional(),
   d1DatabaseId: d1DatabaseIdSchema.optional(),
   token: z.string().trim().min(8).max(512).optional(),
 });
 
-function defaultReaderFactory(project: ProjectRecord, token: string): StatsReader {
-  return createProjectReader(project, token);
+const agentUpdateSchema = z.object({
+  name: nameSchema.optional(),
+  baseUrl: z.string().trim().min(1).max(2048).optional(),
+  apiKey: z.string().trim().min(32).max(512).optional(),
+});
+
+type CreatePayload =
+  | { type: "d1"; data: z.infer<typeof d1CreateSchema> }
+  | { type: "agent"; data: z.infer<typeof agentCreateSchema> };
+
+/**
+ * Branch create-payload validation on the project type. A missing
+ * `type` means `d1` (the v1 payload shape); an unknown type is a 400.
+ */
+function parseCreatePayload(body: unknown): CreatePayload | null {
+  if (typeof body !== "object" || body === null) return null;
+  const type = (body as { type?: unknown }).type;
+  if (type === undefined || type === "d1") {
+    const parsed = d1CreateSchema.safeParse(body);
+    return parsed.success ? { type: "d1", data: parsed.data } : null;
+  }
+  if (type === "agent") {
+    const parsed = agentCreateSchema.safeParse(body);
+    return parsed.success ? { type: "agent", data: parsed.data } : null;
+  }
+  return null;
+}
+
+function defaultReaderFactory(project: ProjectRecord, credential: string): ProjectStatsReader {
+  return createProjectReader(project, credential);
+}
+
+function defaultAgentValidate(baseUrl: string, apiKey: string): Promise<{ version: number }> {
+  return new HttpAgentReader({ baseUrl, apiKey }).validate();
+}
+
+/** Registration-time plugin check failures, phrased for the operator. */
+function agentRegistrationError(cause: unknown): string {
+  if (cause instanceof AgentReadError) {
+    switch (cause.kind) {
+      case "unreachable":
+        return "agent registration failed: could not reach the plugin at the base URL";
+      case "not-found":
+        return "agent registration failed: no AuthFleet plugin found at the base URL (check the URL and that the plugin is installed)";
+      case "unauthorized":
+        return "agent registration failed: the plugin rejected the API key";
+      case "version-mismatch":
+        return `agent registration failed: ${cause.message}`;
+      default:
+        return "agent registration failed: the plugin returned an unexpected response";
+    }
+  }
+  return "agent registration failed: plugin validation error";
 }
 
 export function createApp(deps: AppDeps) {
   const readerFactory = deps.readerFactory ?? defaultReaderFactory;
+  const agentValidate = deps.agentValidate ?? defaultAgentValidate;
   const app = new Hono<{ Variables: Variables }>();
 
   app.get("/health", (c) => c.json({ ok: true, service: "authfleet-api" }));
@@ -119,10 +186,10 @@ export function createApp(deps: AppDeps) {
     return deps.repo.getProject(id);
   }
 
-  async function readerFor(project: ProjectRecord): Promise<StatsReader> {
+  async function readerFor(project: ProjectRecord): Promise<ProjectStatsReader> {
     const key = await deps.getEncryptionKey();
-    const token = await decryptProjectToken(key, project);
-    return readerFactory(project, token);
+    const credential = await decryptProjectCredential(key, project);
+    return readerFactory(project, credential);
   }
 
   app.get("/api/projects", async (c) => {
@@ -135,23 +202,63 @@ export function createApp(deps: AppDeps) {
   });
 
   app.post("/api/projects", async (c) => {
-    const parsed = projectCreateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      return c.json({ error: "invalid project payload", issues: parsed.error.issues }, 400);
+    const payload = parseCreatePayload(await c.req.json().catch(() => null));
+    if (!payload) {
+      return c.json({ error: "invalid project payload" }, 400);
     }
-    // The row id is generated up front: the token ciphertext is
+    // The row id is generated up front: the credential ciphertext is
     // AAD-bound to it (audit F5), so encryption needs the id first.
     const id = newId();
     const key = await deps.getEncryptionKey();
-    const encrypted = await encryptText(key, parsed.data.token, projectTokenAad(id));
+
+    if (payload.type === "agent") {
+      let baseUrl: string;
+      try {
+        baseUrl = normalizeAgentBaseUrl(payload.data.baseUrl);
+      } catch {
+        return c.json(
+          {
+            error:
+              "agent registration failed: baseUrl must be a valid https URL (http is allowed only for localhost)",
+          },
+          400,
+        );
+      }
+      // Connectivity + contract check BEFORE anything is stored: a
+      // typo'd URL or key fails here with a specific error, and no
+      // project row is created (spec: agent registration scenario).
+      try {
+        await agentValidate(baseUrl, payload.data.apiKey);
+      } catch (cause) {
+        console.error(`agent validation failed for ${baseUrl}:`, cause);
+        return c.json({ error: agentRegistrationError(cause) }, 400);
+      }
+      const encrypted = await encryptText(key, payload.data.apiKey, projectTokenAad(id));
+      const record = await deps.repo.createProject({
+        id,
+        type: "agent",
+        name: payload.data.name,
+        cfAccountId: null,
+        d1DatabaseId: null,
+        baseUrl,
+        tokenCiphertext: encrypted.ciphertext,
+        tokenIv: encrypted.iv,
+        tokenHint: tokenHint(payload.data.apiKey),
+      });
+      return c.json({ project: toPublicProject(record) }, 201);
+    }
+
+    const encrypted = await encryptText(key, payload.data.token, projectTokenAad(id));
     const record = await deps.repo.createProject({
       id,
-      name: parsed.data.name,
-      cfAccountId: parsed.data.cfAccountId,
-      d1DatabaseId: parsed.data.d1DatabaseId,
+      type: "d1",
+      name: payload.data.name,
+      cfAccountId: payload.data.cfAccountId,
+      d1DatabaseId: payload.data.d1DatabaseId,
+      baseUrl: null,
       tokenCiphertext: encrypted.ciphertext,
       tokenIv: encrypted.iv,
-      tokenHint: tokenHint(parsed.data.token),
+      tokenHint: tokenHint(payload.data.token),
     });
     return c.json({ project: toPublicProject(record) }, 201);
   });
@@ -159,18 +266,56 @@ export function createApp(deps: AppDeps) {
   app.patch("/api/projects/:id", async (c) => {
     const id = c.req.param("id");
     if (id === DEMO_PROJECT_ID) return c.json({ error: "demo project is read-only" }, 400);
-    const parsed = projectUpdateSchema.safeParse(await c.req.json().catch(() => null));
-    if (!parsed.success) {
-      return c.json({ error: "invalid project payload", issues: parsed.error.issues }, 400);
+    const existing = await deps.repo.getProject(id);
+    if (!existing) return c.json({ error: "project not found" }, 404);
+    const body = await c.req.json().catch(() => null);
+    // A project's type is immutable: the credential semantics differ
+    // per type, so changing type means delete + re-register. The
+    // update schema branches on the EXISTING project's type, and
+    // fields belonging to the other type are rejected outright (a
+    // silently ignored credential field would look like a rotation
+    // that never happened).
+    if (typeof body === "object" && body !== null) {
+      const fields = body as Record<string, unknown>;
+      if ("type" in fields && fields.type !== existing.type) {
+        return c.json({ error: "project type cannot be changed" }, 400);
+      }
+      const foreignFields =
+        existing.type === "agent"
+          ? ["token", "cfAccountId", "d1DatabaseId"]
+          : ["apiKey", "baseUrl"];
+      if (foreignFields.some((f) => f in fields)) {
+        return c.json({ error: "invalid project payload" }, 400);
+      }
     }
-    const { token, ...rest } = parsed.data;
-    const patch: Parameters<ProjectRepository["updateProject"]>[1] = { ...rest };
-    if (token) {
+    const patch: Parameters<ProjectRepository["updateProject"]>[1] = {};
+    let credential: string | undefined;
+    if (existing.type === "agent") {
+      const parsed = agentUpdateSchema.safeParse(body);
+      if (!parsed.success) return c.json({ error: "invalid project payload" }, 400);
+      if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+      if (parsed.data.baseUrl !== undefined) {
+        try {
+          patch.baseUrl = normalizeAgentBaseUrl(parsed.data.baseUrl);
+        } catch {
+          return c.json({ error: "invalid project payload" }, 400);
+        }
+      }
+      credential = parsed.data.apiKey;
+    } else {
+      const parsed = d1UpdateSchema.safeParse(body);
+      if (!parsed.success) return c.json({ error: "invalid project payload" }, 400);
+      if (parsed.data.name !== undefined) patch.name = parsed.data.name;
+      if (parsed.data.cfAccountId !== undefined) patch.cfAccountId = parsed.data.cfAccountId;
+      if (parsed.data.d1DatabaseId !== undefined) patch.d1DatabaseId = parsed.data.d1DatabaseId;
+      credential = parsed.data.token;
+    }
+    if (credential) {
       const key = await deps.getEncryptionKey();
-      const encrypted = await encryptText(key, token, projectTokenAad(id));
+      const encrypted = await encryptText(key, credential, projectTokenAad(id));
       patch.tokenCiphertext = encrypted.ciphertext;
       patch.tokenIv = encrypted.iv;
-      patch.tokenHint = tokenHint(token);
+      patch.tokenHint = tokenHint(credential);
     }
     const updated = await deps.repo.updateProject(id, patch);
     if (!updated) return c.json({ error: "project not found" }, 404);

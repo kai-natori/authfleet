@@ -1,40 +1,80 @@
-/** A registered project as stored in the registry D1. Token is ciphertext only. */
+/**
+ * How the dashboard reaches a project:
+ * - `d1`: pull model — read the project's D1 via the Cloudflare HTTP
+ *   query API with a per-project read-only Cloudflare token.
+ * - `agent`: the AuthFleet plugin inside the target app serves counts
+ *   over HTTP; the registry stores the app's base URL + the plugin
+ *   API key.
+ */
+export type ProjectType = "d1" | "agent";
+
+/**
+ * A registered project as stored in the registry D1. The credential
+ * (Cloudflare token for `d1`, plugin API key for `agent`) is
+ * ciphertext only, in the same columns for both types — the AES-GCM +
+ * AAD scheme is shared (see the agent-plugin design). Per-type fields
+ * that do not apply are null.
+ */
 export interface ProjectRecord {
   id: string;
+  type: ProjectType;
   name: string;
-  cfAccountId: string;
-  d1DatabaseId: string;
+  /** `d1` only: Cloudflare account id. */
+  cfAccountId: string | null;
+  /** `d1` only: D1 database id. */
+  d1DatabaseId: string | null;
+  /** `agent` only: the target app's Better Auth base URL. */
+  baseUrl: string | null;
   tokenCiphertext: string;
   tokenIv: string;
-  /** Last 4 chars of the plaintext token, for display only. */
+  /** Last 4 chars of the plaintext credential, for display only. */
   tokenHint: string;
   isDemo: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
-/** A project as exposed through the API — never includes token material. */
-export interface PublicProject {
+interface PublicProjectBase {
   id: string;
   name: string;
-  cfAccountId: string;
-  d1DatabaseId: string;
   tokenHint: string;
   isDemo: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
+/**
+ * A project as exposed through the API — never includes credential
+ * material, and omits the per-type fields that do not apply.
+ */
+export type PublicProject =
+  | (PublicProjectBase & {
+      type: "d1";
+      cfAccountId: string;
+      d1DatabaseId: string;
+    })
+  | (PublicProjectBase & {
+      type: "agent";
+      baseUrl: string;
+    });
+
 export function toPublicProject(record: ProjectRecord): PublicProject {
-  return {
+  const base: PublicProjectBase = {
     id: record.id,
     name: record.name,
-    cfAccountId: record.cfAccountId,
-    d1DatabaseId: record.d1DatabaseId,
     tokenHint: record.tokenHint,
     isDemo: record.isDemo,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
+  };
+  if (record.type === "agent") {
+    return { ...base, type: "agent", baseUrl: record.baseUrl ?? "" };
+  }
+  return {
+    ...base,
+    type: "d1",
+    cfAccountId: record.cfAccountId ?? "",
+    d1DatabaseId: record.d1DatabaseId ?? "",
   };
 }
 
@@ -65,13 +105,15 @@ export interface SnapshotRecord {
 export interface CreateProjectData {
   /**
    * Optional caller-supplied row id. The api generates the id up front
-   * because the token ciphertext is AAD-bound to it (see core crypto).
-   * Repositories fall back to `newId()` when absent.
+   * because the credential ciphertext is AAD-bound to it (see core
+   * crypto). Repositories fall back to `newId()` when absent.
    */
   id?: string;
+  type: ProjectType;
   name: string;
-  cfAccountId: string;
-  d1DatabaseId: string;
+  cfAccountId: string | null;
+  d1DatabaseId: string | null;
+  baseUrl: string | null;
   tokenCiphertext: string;
   tokenIv: string;
   tokenHint: string;
@@ -80,8 +122,9 @@ export interface CreateProjectData {
 
 export interface UpdateProjectData {
   name?: string;
-  cfAccountId?: string;
-  d1DatabaseId?: string;
+  cfAccountId?: string | null;
+  d1DatabaseId?: string | null;
+  baseUrl?: string | null;
   tokenCiphertext?: string;
   tokenIv?: string;
   tokenHint?: string;

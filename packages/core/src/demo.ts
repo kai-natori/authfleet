@@ -13,9 +13,11 @@ export function demoProject(): ProjectRecord {
   const now = new Date().toISOString();
   return {
     id: DEMO_PROJECT_ID,
+    type: "d1",
     name: "Demo — Acme",
     cfAccountId: "demo-account",
     d1DatabaseId: "demo-database",
+    baseUrl: null,
     tokenCiphertext: "",
     tokenIv: "",
     tokenHint: "demo",
