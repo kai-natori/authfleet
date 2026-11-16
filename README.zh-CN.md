@@ -31,25 +31,76 @@ Cloudflare 账户里。
 └──────────────────────────────┘                     └──────────────┬───────────────┘
                                                                   │
                                           注册表 D1 (Drizzle)    │  Cloudflare D1 HTTP
-                                          - projects（令牌经    │  查询 API，每项目一个
+                                          - projects（凭据经    │  查询 API，每项目一个
                                             AES-GCM 加密）      │  只读令牌
                                           - snapshots             ▼
-                                                    目标项目的 D1 数据库
+                                                    目标项目的 D1 数据库（d1 项目）
                                                     （统计 Better Auth 的 `user` 表）
+                                                                  │  HTTPS + 每项目
+                                                                  │  一个 Bearer API 密钥
+                                                                  ▼
+                                                    装有插件的目标应用（agent 项目）
+                                                    （计数由应用自身返回，数据库不限）
 ```
 
 - `apps/api` — 运行在 Workers 上的 Hono。负责注册表 CRUD、统计和定时
   快照任务。它持有全部凭据，因此**不对外公开**（见下方安全模型）。
 - `apps/web` — TanStack Start 仪表盘，置于 Cloudflare Access 之后。
 - `packages/core` — 两边共享的、无框架依赖的逻辑：小写 ULID id、
-  AES-GCM 凭据加密（WebCrypto）、远程 D1 读取器、统计计算、快照任务、
-  演示数据夹具。
+  AES-GCM 凭据加密（WebCrypto）、远程 D1 读取器、插件 HTTP 读取器、
+  统计计算、快照任务、演示数据夹具。两个读取器实现同一个
+  `ProjectStatsReader` 契约，因此统计、快照和仪表盘对两种项目类型的
+  行为完全一致。
+- `packages/plugin` — npm 包 `authfleet`：供目标应用安装的只读
+  Better Auth 插件（见下文“连接项目”）。
 - `apps/mcp` — 仅在规划中，尚未实现（见路线图）。
 
-每个项目展示的数据：Better Auth `user` 表的用户总数、按 `created_at`
-统计的每日注册数、最近 7 天 / 30 天的新增用户、当表中有
-`is_anonymous` 类字段时的匿名（游客）用户数，以及由 api 的 cron 每日
-快照计算出的增长。核心交互是项目切换；跨项目合计有意不纳入 v1 范围。
+每个项目展示的数据：Better Auth `user` 表的用户总数、按创建时间统计
+的每日注册数、最近 7 天 / 30 天的新增用户、当用户数据带有匿名字段时
+的匿名（游客）用户数，以及由 api 的 cron 每日快照计算出的增长。核心
+交互是项目切换；跨项目合计有意不在范围内。
+
+## 连接项目
+
+连接方式有两种，注册项目时选择。
+
+**D1 项目**（应用使用 Cloudflare D1）：注册 Cloudflare 账户 id、
+D1 数据库 id，以及一个仅对该数据库有 D1 读取权限的 Cloudflare API
+令牌。目标应用无需任何改动。
+
+**插件项目**（其他数据库——Postgres、MySQL、SQLite 等）：在目标应用
+里安装 AuthFleet 插件。插件通过应用内部的只读端点返回同样的计数，
+读取走应用自身的 Better Auth 数据库适配器，因此 Better Auth 支持的
+数据库都能用。
+
+```bash
+npm install authfleet
+```
+
+```ts
+import { betterAuth } from "better-auth";
+import { authfleet } from "authfleet";
+
+export const auth = betterAuth({
+  plugins: [
+    authfleet({
+      apiKeyHash: process.env.AUTHFLEET_API_KEY_HASH,
+    }),
+  ],
+});
+```
+
+在仪表盘里生成项目 API 密钥（项目 → 添加项目 → Plugin →
+“Generate a key”）。密钥只显示**一次**，同时会给出它的 SHA-256
+哈希：把应用的环境变量 `AUTHFLEET_API_KEY_HASH` 设为该哈希——应用
+只持有哈希，永远不持有密钥本身。然后用应用的 Better Auth 基础 URL
+（源 + 基础路径，例如 `https://example.com/api/auth`）和同一个密钥
+注册项目。注册时会在保存之前调用插件的 `GET /authfleet/validate`
+验证连接，URL 或密钥填错会立即报出具体错误。
+
+插件**只返回计数、且只读**：没有任何端点返回用户行、邮箱或 id；
+它从不写入应用的数据库；也没有开发模式绕过（本地开发请用一次性的
+真实密钥）。完整说明与威胁备注见 `packages/plugin/README.md`。
 
 ## 安全模型
 
@@ -74,15 +125,20 @@ Cloudflare 账户里。
   设置了 `AUTHFLEET_OPERATOR_EMAILS`（逗号分隔，**生产环境务必设置**）
   时，无论 Access 策略放行了谁，名单之外的人一律 403。api 不会在
   响应中回显运营者身份。
-- **令牌加密存储。** 每个项目的 Cloudflare API 令牌在写入 D1 之前都
-  经过 AES-GCM 加密（WebCrypto，256 位密钥来自 `TOKEN_ENCRYPTION_KEY`
-  Worker secret，每条记录随机 IV）。密文还通过 AES-GCM 的 AAD 与其
-  项目行绑定，因此把密文复制到另一个项目的行里也无法解密。API 永远
-  不返回令牌——只返回末尾 4 位提示——令牌也从不写入日志。
-- **令牌应当是只读的。** 为每个项目注册一个仅对该数据库有 D1 读取
-  权限的 Cloudflare API 令牌。AuthFleet 的 core 在代码里（不只是靠
-  约定）强制只允许单条 `SELECT` 语句，因此它即使出问题也不可能改动
-  目标项目。
+- **凭据加密存储。** 每个项目的凭据——`d1` 项目是 Cloudflare API
+  令牌，`agent` 项目是插件 API 密钥——在写入 D1 之前都经过 AES-GCM
+  加密（WebCrypto，256 位密钥来自 `TOKEN_ENCRYPTION_KEY` Worker
+  secret，每条记录随机 IV）。密文还通过 AES-GCM 的 AAD 与其项目行
+  绑定，因此把密文复制到另一个项目的行里也无法解密。API 永远不返回
+  凭据——只返回末尾 4 位提示——凭据也从不写入日志。
+- **两条路径都是只读的。** 为每个 `d1` 项目注册一个仅对该数据库有
+  D1 读取权限的 Cloudflare API 令牌；AuthFleet 的 core 在代码里
+  （不只是靠约定）强制只允许单条 `SELECT` 语句，因此它即使出问题也
+  不可能改动目标项目。`agent` 插件按设计只读、只返回计数；目标应用
+  只持有密钥的 SHA-256 哈希，插件以常数时间比较。
+- **agent 基础 URL 只允许 HTTPS**（仅本地开发的 localhost 例外允许
+  HTTP）；注册时会在保存前验证插件；插件缺失、不可达或契约版本不
+  支持的项目会以各自独立的状态展示——绝不会显示成“0 用户”。
 - **错误不泄露上游细节。** 目标读取失败时，api 返回给仪表盘的只是
   通用错误；Cloudflare 的错误码和消息只留在服务器端日志里。
 - **ID 不是秘密。** 行 id 是小写 ULID；任何能授予访问权限的值都使用
@@ -152,10 +208,9 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 
 ## 路线图
 
-- **Agent 插件（v2，规格见 `openspec/changes/add-agent-plugin/`）**：
-  一个只读的 Better Auth 插件（npm 上的 `authfleet`），任何数据库
-  上的应用——包括 Postgres——都能安装，让 AuthFleet 通过应用本身
-  读取计数，而不只是经由 D1。
+- **Agent 插件**：已实现（`packages/plugin`，端点契约 v1，已在
+  Better Auth 1.4 与 1.7 上测试）。剩下的步骤是第二轮安全审计，
+  它是首次发布到 npm 的前置门槛。
 - `apps/mcp`：在同一套 core 之上的只读 MCP 服务器（可以问你的 AI
   “我的应用现在有多少用户？”）——按设计推迟于 v1。
 - 两个 Worker 一键部署。

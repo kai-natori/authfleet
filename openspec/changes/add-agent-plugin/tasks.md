@@ -102,12 +102,12 @@
 
 ## 7. Docs
 
-- [ ] README: plugin install + registration instructions, updated
+- [x] README: plugin install + registration instructions, updated
   architecture notes (two connection models), roadmap line for the
   plugin as the decided v2 adapter
-- [ ] `openspec/project.md`: record the second connection model and
+- [x] `openspec/project.md`: record the second connection model and
   the plugin's counts-only / read-only invariants
-- [ ] Plugin versioning policy documented (contract version vs.
+- [x] Plugin versioning policy documented (contract version vs.
   package version vs. Better Auth peer range)
 
 ## 8. Security audit round 2 (gates first npm publish)

@@ -34,11 +34,16 @@ exists.
 └──────────────────────────────┘                     └──────────────┬───────────────┘
                                                                   │
                                           registry D1 (Drizzle)   │  Cloudflare D1 HTTP
-                                          - projects (token is    │  query API, per-project
+                                          - projects (credential  │  query API, per-project
                                             AES-GCM encrypted)    │  read-only token
                                           - snapshots             ▼
-                                                    target projects' D1 databases
+                                                    target projects' D1 databases  (d1 projects)
                                                     (Better Auth `user` table counts)
+                                                                  │  HTTPS + per-project
+                                                                  │  Bearer API key
+                                                                  ▼
+                                                    target apps running the plugin  (agent projects)
+                                                    (counts served by the app itself, any database)
 ```
 
 - `apps/api` — Hono on Workers. Registry CRUD, stats, and the scheduled
@@ -47,15 +52,64 @@ exists.
 - `apps/web` — TanStack Start dashboard behind Cloudflare Access.
 - `packages/core` — framework-free logic shared by both: lowercase-ULID
   ids, AES-GCM credential encryption (WebCrypto), the remote D1 reader,
-  stats math, the snapshot job, demo fixtures.
+  the plugin HTTP reader, stats math, the snapshot job, demo fixtures.
+  Both readers implement one `ProjectStatsReader` contract, so stats,
+  snapshots and the dashboard behave identically for both project types.
+- `packages/plugin` — the `authfleet` npm package: a read-only Better
+  Auth plugin for target apps (see "Connecting a project" below).
 - `apps/mcp` — planned, not built yet (see Roadmap).
 
 Data per project: total users in the Better Auth `user` table, signups
-per day from `created_at`, new users (7d / 30d), the anonymous/guest
-count when the table has an `is_anonymous`-style column, and growth from
-daily snapshots taken by the api cron. Switching projects is the core
-interaction; combined cross-project totals are intentionally out of
-scope for v1.
+per day from the creation timestamp, new users (7d / 30d), the
+anonymous/guest count when the user data has an anonymous flag, and
+growth from daily snapshots taken by the api cron. Switching projects
+is the core interaction; combined cross-project totals are intentionally
+out of scope.
+
+## Connecting a project
+
+There are two connection types; choose per project when you register it.
+
+**D1 projects** (the app uses Cloudflare D1): register the Cloudflare
+account id, the D1 database id, and a Cloudflare API token scoped to
+D1 read for that one database. Nothing changes in the target app.
+
+**Plugin projects** (any other database — Postgres, MySQL, SQLite, …):
+install the AuthFleet plugin in the target app. It serves the same
+counts through two read-only endpoints inside the app, reading through
+the app's own Better Auth DB adapter, so it works on any database
+Better Auth supports.
+
+```bash
+npm install authfleet
+```
+
+```ts
+import { betterAuth } from "better-auth";
+import { authfleet } from "authfleet";
+
+export const auth = betterAuth({
+  plugins: [
+    authfleet({
+      apiKeyHash: process.env.AUTHFLEET_API_KEY_HASH,
+    }),
+  ],
+});
+```
+
+Generate a project API key in the dashboard (Projects → Add project →
+Plugin → "Generate a key"). The dashboard shows the key **once** and
+gives you its SHA-256 hash: set `AUTHFLEET_API_KEY_HASH` to that hash
+in the app's environment — the app only ever holds the hash, never the
+key. Then register the project with the app's Better Auth base URL
+(origin + base path, e.g. `https://example.com/api/auth`) and the same
+key. Registration calls the plugin's `GET /authfleet/validate` before
+saving, so a wrong URL or key fails immediately with a specific error.
+
+The plugin is **counts-only and read-only**: no endpoint returns user
+rows, emails or ids; it never writes to the app's database; and there
+is no dev-mode bypass (use a real throwaway key locally). Full details
+and threat notes: `packages/plugin/README.md`.
 
 ## Security model
 
@@ -84,18 +138,26 @@ projects, so its own posture matters.
   (comma-separated; **set it in production**) — rejects anyone outside
   that allowlist with 403, whatever the Access policy admits. The api
   does not echo the operator identity in responses.
-- **Tokens are encrypted at rest.** Each project's Cloudflare API token
-  is encrypted with AES-GCM (WebCrypto, 256-bit key from the
-  `TOKEN_ENCRYPTION_KEY` Worker secret, random IV per record) before it
-  touches D1. The ciphertext is additionally bound to its project row
-  via AES-GCM AAD, so a ciphertext copied into another project's row
-  does not decrypt. The API never returns a token — only a last-4
-  hint — and tokens are never logged.
-- **Tokens should be read-only.** Register each project with a
-  Cloudflare API token scoped to D1 read for that one database.
+- **Credentials are encrypted at rest.** Each project's credential —
+  the Cloudflare API token for `d1` projects, the plugin API key for
+  `agent` projects — is encrypted with AES-GCM (WebCrypto, 256-bit key
+  from the `TOKEN_ENCRYPTION_KEY` Worker secret, random IV per record)
+  before it touches D1. The ciphertext is additionally bound to its
+  project row via AES-GCM AAD, so a ciphertext copied into another
+  project's row does not decrypt. The API never returns a credential —
+  only a last-4 hint — and credentials are never logged.
+- **Reads are read-only on both paths.** Register each `d1` project
+  with a Cloudflare API token scoped to D1 read for that one database;
   AuthFleet core enforces single-statement `SELECT`-only queries in
   code (not just by convention), so it cannot mutate a target project
-  even by accident.
+  even by accident. The `agent` plugin is read-only and counts-only by
+  design, and the target app holds only a SHA-256 hash of its key,
+  which the plugin compares in constant time.
+- **Agent base URLs are HTTPS-only** (plain HTTP is accepted only for
+  localhost in local development), registration verifies the plugin
+  before saving, and a project whose plugin is absent, unreachable or
+  on an unsupported contract version is shown as that distinct state —
+  never as a zero-user project.
 - **Errors don't leak upstream detail.** When a target read fails, api
   returns a generic error to the dashboard; Cloudflare's error codes
   and messages stay in server-side logs only.
@@ -169,10 +231,9 @@ deploys in this order.)
 
 ## Roadmap
 
-- **Agent plugin (v2, specced in `openspec/changes/add-agent-plugin/`)**:
-  a read-only Better Auth plugin (`authfleet` on npm) that apps on any
-  database — Postgres included — can install, so AuthFleet can read
-  their counts through the app itself instead of only via D1.
+- **Agent plugin**: implemented (`packages/plugin`, endpoint contract
+  v1, tested against Better Auth 1.4 and 1.7) — the remaining step is
+  the round-2 security audit, which gates the first npm publish.
 - `apps/mcp`: a read-only MCP server over the same core (ask your AI
   "how many users does my app have?") — deferred from v1 by design.
 - One-command deploy for both Workers.
