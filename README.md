@@ -239,3 +239,18 @@ deploys in this order.)
 - One-command deploy for both Workers.
 - Optional write actions per project (ban/delete) behind explicit
   confirmation — only if demand appears; v1 is read-only by design.
+
+## Releasing
+
+The npm packages are published from GitHub Actions, never from a local
+machine. The **Publish to npm** workflow (`.github/workflows/publish.yml`)
+is dispatched manually and takes the `NPM_TOKEN` repository secret — a
+granular npm access token with publish rights for `authfleet` and
+`auth-fleet` and 2FA bypass enabled. This includes the first publish of
+both packages.
+
+- Choose `plugin` to build and publish `authfleet` (`packages/plugin`)
+  with provenance.
+- Choose `nameguard` to publish `auth-fleet` (`packages/nameguard`), the
+  name-guard placeholder. It is published once and never updated.
+- Choose `both` to publish the two in one run.

@@ -216,3 +216,8 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 - 两个 Worker 一键部署。
 - 每个项目的可选写操作（封禁/删除），带显式确认——仅在出现需求时；
   v1 按设计是只读的。
+
+## 发布
+
+npm 包通过 GitHub Actions 手动发布（包括首次发布）。步骤见英文版
+README 的 “Releasing” 一节。

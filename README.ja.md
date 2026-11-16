@@ -243,3 +243,8 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 - 両 Worker のワンコマンドデプロイ。
 - プロジェクトごとの書き込み操作（BAN／削除）を、明示的な確認を挟んで
   任意で提供 — 需要が出た場合のみ。v1 は設計として読み取り専用です。
+
+## リリース
+
+npm パッケージの公開は GitHub Actions から手動で行います（初回公開を
+含む）。手順は英語版 README の「Releasing」を参照してください。

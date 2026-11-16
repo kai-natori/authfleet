@@ -534,11 +534,11 @@ ordering test is deterministic (core suite 10/10 repeat runs green).
 
 ### Summary
 
-| Severity | Count |
-| -------- | ----- |
-| Critical | 0     |
-| High     | 0     |
-| Medium   | 0     |
+| Severity | Count                       |
+| -------- | --------------------------- |
+| Critical | 0                           |
+| High     | 0                           |
+| Medium   | 0                           |
 | Low      | 3 (all fixed in this round) |
 
 ### Findings
@@ -572,7 +572,7 @@ path. (The check is a typo/consistency guard for a single trusted
 operator, not a trust boundary — hence Low.)
 
 **Fix — FIXED in this round.** When a PATCH changes `baseUrl` or
-`apiKey`, the api validates the *effective* pair first — a URL-only
+`apiKey`, the api validates the _effective_ pair first — a URL-only
 change is checked against the stored (decrypted) key, a key-only
 change against the stored URL — and a failed check returns 400 and
 leaves the project untouched. Name-only updates skip the check.
@@ -638,7 +638,7 @@ the WHATWG parser normalises hex/octal IPv4 and compressed IPv6
 spellings before the comparison, so those aliases cannot smuggle a
 loopback past the check (`localhost.` with a trailing dot does not
 match and stays HTTPS-only). Accepted residual, by design: an HTTPS
-hostname that *resolves* to a private address is not blocked — the
+hostname that _resolves_ to a private address is not blocked — the
 base URL is operator-supplied in a single-operator deployment, the
 credential travels only to that origin over TLS, and Workers egress
 blocks private ranges in the deployed topology. Error discipline
