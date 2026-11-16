@@ -68,7 +68,17 @@ export interface FixtureUser {
 }
 
 export interface Fixture {
-  auth: ReturnType<typeof betterAuth>;
+  // Structural on purpose: the concrete Auth<...> type varies with the
+  // plugin set (e.g. the anonymous variant), and the fixture only ever
+  // needs the request handler.
+  auth: {
+    handler: (request: Request) => Promise<Response>;
+    api: {
+      signUpEmail: (args: {
+        body: { email: string; password: string; name: string };
+      }) => Promise<unknown>;
+    };
+  };
   db: DatabaseSync;
   apiKeyHash: string;
   /** User ids created by seeding, for the PII-absence assertions. */

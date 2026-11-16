@@ -52,7 +52,9 @@ describe("snapshot job", () => {
     const repo = new InMemoryProjectRepository();
     const a = await repo.createProject({
       name: "A",
+      type: "d1",
       cfAccountId: "x",
+      baseUrl: null,
       d1DatabaseId: "1",
       tokenCiphertext: "c",
       tokenIv: "i",
@@ -60,7 +62,9 @@ describe("snapshot job", () => {
     });
     const b = await repo.createProject({
       name: "B",
+      type: "d1",
       cfAccountId: "x",
+      baseUrl: null,
       d1DatabaseId: "2",
       tokenCiphertext: "c",
       tokenIv: "i",
@@ -68,7 +72,9 @@ describe("snapshot job", () => {
     });
     await repo.createProject({
       name: "Demo",
+      type: "d1",
       cfAccountId: "x",
+      baseUrl: null,
       d1DatabaseId: "3",
       tokenCiphertext: "",
       tokenIv: "",
@@ -100,7 +106,9 @@ describe("snapshot job", () => {
     const repo = new InMemoryProjectRepository();
     const a = await repo.createProject({
       name: "A",
+      type: "d1",
       cfAccountId: "x",
+      baseUrl: null,
       d1DatabaseId: "1",
       tokenCiphertext: "c",
       tokenIv: "i",
