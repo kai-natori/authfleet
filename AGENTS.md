@@ -12,7 +12,6 @@ for the product/security model and `openspec/` for behaviour contracts.
 | `packages/core`      | Framework-free logic: ids, crypto, remote D1 reader, plugin HTTP reader (`HttpAgentReader`), registry contract, stats, snapshots, demo fixtures. Both readers implement `ProjectStatsReader`. |
 | `packages/plugin`    | The `authfleet` npm package: read-only, counts-only Better Auth plugin for target apps (contract v1). Never log key material; no dev bypass; no DB writes.                                    |
 | `packages/test-ba14` | Version-matrix cell: the plugin contract suite against Better Auth 1.4 (vitest aliases bind the plugin source to the 1.4 modules).                                                            |
-| `packages/nameguard` | The `auth-fleet` npm package: a name-guard placeholder with no code and no build/test scripts. Published once via the manual **Publish to npm** workflow; never updated.                      |
 | `apps/mcp`           | Deferred. Do not create without a new OpenSpec change.                                                                                                                                        |
 
 ## Non-negotiables

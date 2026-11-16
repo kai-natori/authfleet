@@ -1,28 +1,16 @@
 # Publish to npm — manual dispatch only (no tag triggers).
 #
 # Releases run from GitHub Actions using the NPM_TOKEN repository secret
-# (a granular npm access token with publish rights for `authfleet` and
-# `auth-fleet`, with 2FA bypass enabled). This workflow is also how the
-# FIRST publish of both packages happens: Actions -> "Publish to npm" ->
-# Run workflow -> choose what to publish.
+# (a granular npm access token with publish rights for `authfleet`,
+# with 2FA bypass enabled). This workflow is also how the FIRST publish
+# of the package happens: Actions -> "Publish to npm" -> Run workflow.
 #
-# - plugin:    `authfleet` (packages/plugin) — built, then published
-#              with provenance (id-token permission below).
-# - nameguard: `auth-fleet` (packages/nameguard) — a name-guard package
-#              with no code; published once and never updated.
+# - plugin: `authfleet` (packages/plugin) — built, then published
+#           with provenance (id-token permission below).
 name: Publish to npm
 
 on:
   workflow_dispatch:
-    inputs:
-      package:
-        description: Which package to publish
-        required: true
-        type: choice
-        options:
-          - plugin
-          - nameguard
-          - both
 
 permissions:
   contents: read
@@ -46,19 +34,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build plugin
-        if: inputs.package == 'plugin' || inputs.package == 'both'
         run: pnpm --filter authfleet build
 
       - name: Publish plugin (authfleet)
-        if: inputs.package == 'plugin' || inputs.package == 'both'
         working-directory: packages/plugin
         run: npm publish --provenance
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-
-      - name: Publish nameguard (auth-fleet)
-        if: inputs.package == 'nameguard' || inputs.package == 'both'
-        working-directory: packages/nameguard
-        run: npm publish
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
