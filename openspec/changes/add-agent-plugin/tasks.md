@@ -40,18 +40,18 @@
 
 ## 3. Contract tests + fixture app
 
-- [ ] Fixture Better Auth app on a **non-D1 database** (Postgres or
+- [x] Fixture Better Auth app on a **non-D1 database** (Postgres or
   SQLite via a non-Cloudflare adapter) with the plugin installed —
   proves DB-agnosticism end to end
-- [ ] Contract tests against the fixture: validate/stats response
+- [x] Contract tests against the fixture: validate/stats response
   shapes match the recorded contract v1 exactly
-- [ ] Auth tests: missing key → 401, wrong key → 401, correct key →
+- [x] Auth tests: missing key → 401, wrong key → 401, correct key →
   200; key never appears in fixture app logs
-- [ ] Custom-schema fixture variant (renamed user model / `createdAt`
+- [x] Custom-schema fixture variant (renamed user model / `createdAt`
   field) still returns correct stats, per spike findings
-- [ ] Version matrix: fixture suite runs against Better Auth 1.4 and
+- [x] Version matrix: fixture suite runs against Better Auth 1.4 and
   1.7 at minimum (1.5/1.6 if the spike found differences)
-- [ ] PII test: stats response contains no user rows, emails or ids
+- [x] PII test: stats response contains no user rows, emails or ids
 
 ## 4. Core: HttpAgentReader (packages/core)
 
