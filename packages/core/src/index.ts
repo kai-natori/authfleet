@@ -1,4 +1,12 @@
 export {
+  AgentReadError,
+  type AgentReadErrorKind,
+  HttpAgentReader,
+  type HttpAgentReaderOptions,
+  normalizeAgentBaseUrl,
+  SUPPORTED_CONTRACT_VERSIONS,
+} from "./agent-reader";
+export {
   decryptText,
   type EncryptedValue,
   encryptText,
@@ -22,6 +30,7 @@ export {
 } from "./demo";
 export { newId } from "./ids";
 export { InMemoryProjectRepository } from "./memory-repo";
+export type { ProjectStatsReader } from "./reader";
 export {
   runSnapshotJob,
   type SnapshotJobDeps,

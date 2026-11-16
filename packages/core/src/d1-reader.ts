@@ -1,3 +1,4 @@
+import type { ProjectStatsReader } from "./reader";
 import { DAY_MS } from "./stats";
 import type { DailySignup, UserStats } from "./types";
 
@@ -137,7 +138,7 @@ export interface RemoteD1ReaderOptions {
 
 const ANON_COLUMNS = ["is_anonymous", "isAnonymous", "is_anon"] as const;
 
-export class RemoteD1Reader {
+export class RemoteD1Reader implements ProjectStatsReader {
   private readonly accountId: string;
   private readonly databaseId: string;
   private readonly token: string;

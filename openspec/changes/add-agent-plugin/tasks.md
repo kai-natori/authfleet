@@ -55,16 +55,16 @@
 
 ## 4. Core: HttpAgentReader (packages/core)
 
-- [ ] Formalize the `ProjectStatsReader` interface in core;
+- [x] Formalize the `ProjectStatsReader` interface in core;
   `RemoteD1Reader` declared as implementing it (no behaviour change)
-- [ ] `HttpAgentReader`: `{ baseUrl, apiKey }`, calls
+- [x] `HttpAgentReader`: `{ baseUrl, apiKey }`, calls
   `GET {baseUrl}/authfleet/stats?days=<n>` with Bearer key over
   https (localhost http allowed), validates contract `version`
   against the supported set
-- [ ] Error mapping: unreachable / 401 / version mismatch / malformed
+- [x] Error mapping: unreachable / 401 / version mismatch / malformed
   body produce distinct typed errors whose detail stays server-side
   (v1 audit F3 discipline — plugin error bodies never forwarded)
-- [ ] Unit tests with a stubbed fetch: happy path, each error class,
+- [x] Unit tests with a stubbed fetch: happy path, each error class,
   contract-version handling (known, older, newer-than-supported)
 
 ## 5. Registry + API (apps/api)
