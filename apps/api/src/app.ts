@@ -130,23 +130,26 @@ function defaultAgentValidate(baseUrl: string, apiKey: string): Promise<{ versio
   return new HttpAgentReader({ baseUrl, apiKey }).validate();
 }
 
-/** Registration-time plugin check failures, phrased for the operator. */
-function agentRegistrationError(cause: unknown): string {
+/** Plugin check failures, phrased for the operator. */
+function agentRegistrationError(
+  cause: unknown,
+  action: "registration" | "update" = "registration",
+): string {
   if (cause instanceof AgentReadError) {
     switch (cause.kind) {
       case "unreachable":
-        return "agent registration failed: could not reach the plugin at the base URL";
+        return `agent ${action} failed: could not reach the plugin at the base URL`;
       case "not-found":
-        return "agent registration failed: no AuthFleet plugin found at the base URL (check the URL and that the plugin is installed)";
+        return `agent ${action} failed: no AuthFleet plugin found at the base URL (check the URL and that the plugin is installed)`;
       case "unauthorized":
-        return "agent registration failed: the plugin rejected the API key";
+        return `agent ${action} failed: the plugin rejected the API key`;
       case "version-mismatch":
-        return `agent registration failed: ${cause.message}`;
+        return `agent ${action} failed: ${cause.message}`;
       default:
-        return "agent registration failed: the plugin returned an unexpected response";
+        return `agent ${action} failed: the plugin returned an unexpected response`;
     }
   }
-  return "agent registration failed: plugin validation error";
+  return `agent ${action} failed: plugin validation error`;
 }
 
 export function createApp(deps: AppDeps) {
@@ -302,6 +305,28 @@ export function createApp(deps: AppDeps) {
         }
       }
       credential = parsed.data.apiKey;
+      // Changing where the plugin lives or which key it expects gets
+      // the same pre-save plugin check as registration (plugin audit
+      // PA2): without it, PATCH was a validate-before-save bypass.
+      // The effective pair is validated — a URL-only change is checked
+      // against the stored key, a key-only change against the stored
+      // URL — and a failed check leaves the project untouched.
+      if (parsed.data.baseUrl !== undefined || credential !== undefined) {
+        const effectiveBaseUrl = patch.baseUrl ?? existing.baseUrl;
+        let effectiveKey = credential;
+        if (!effectiveKey) {
+          const key = await deps.getEncryptionKey();
+          effectiveKey = await decryptProjectCredential(key, existing);
+        }
+        if (effectiveBaseUrl) {
+          try {
+            await agentValidate(effectiveBaseUrl, effectiveKey);
+          } catch (cause) {
+            console.error(`agent validation failed for ${effectiveBaseUrl}:`, cause);
+            return c.json({ error: agentRegistrationError(cause, "update") }, 400);
+          }
+        }
+      }
     } else {
       const parsed = d1UpdateSchema.safeParse(body);
       if (!parsed.success) return c.json({ error: "invalid project payload" }, 400);

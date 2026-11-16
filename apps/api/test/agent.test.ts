@@ -175,6 +175,52 @@ describe("agent project updates", () => {
     expect(JSON.stringify(body)).not.toContain(newKey);
   });
 
+  it("re-validates the plugin on baseUrl/apiKey changes (plugin audit PA2)", async () => {
+    let failValidation = false;
+    const deps = testDeps({
+      agentValidate: async () => {
+        if (failValidation) {
+          throw new AgentReadError("unreachable", "plugin is unreachable");
+        }
+        return { version: 1 };
+      },
+    });
+    const { app, id } = await createAgentProject(deps);
+    failValidation = true;
+
+    // URL-only change: validated against the stored key.
+    const urlRes = await app.request(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: OPERATOR,
+      body: JSON.stringify({ baseUrl: "https://other.example.com/auth" }),
+    });
+    expect(urlRes.status).toBe(400);
+    const urlBody = (await urlRes.json()) as { error: string };
+    expect(urlBody.error).toContain("agent update failed");
+
+    // Key-only change: validated against the stored URL.
+    const keyRes = await app.request(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: OPERATOR,
+      body: JSON.stringify({ apiKey: "another-agent-key-0123456789abcdef" }),
+    });
+    expect(keyRes.status).toBe(400);
+
+    // Neither failed update touched the stored project.
+    const stored = await deps.repo.getProject(id);
+    expect(stored?.baseUrl).toBe(BASE_URL);
+    expect(stored?.tokenHint).toBe("wxyz");
+
+    // A name-only change does not need the plugin check and still works.
+    failValidation = false;
+    const nameRes = await app.request(`/api/projects/${id}`, {
+      method: "PATCH",
+      headers: OPERATOR,
+      body: JSON.stringify({ name: "Renamed" }),
+    });
+    expect(nameRes.status).toBe(200);
+  });
+
   it("rejects type changes and foreign-type fields", async () => {
     const deps = testDeps();
     const { app, id } = await createAgentProject(deps);

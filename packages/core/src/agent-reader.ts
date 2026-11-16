@@ -80,6 +80,13 @@ export function normalizeAgentBaseUrl(baseUrl: string): string {
   if (url.username || url.password) {
     throw new Error("agent baseUrl must not contain credentials");
   }
+  if (url.search || url.hash) {
+    // A query/fragment would end up in the middle of the concatenated
+    // endpoint URLs (`{baseUrl}/authfleet/stats`), corrupting every
+    // request — reject it at configuration time instead (plugin audit
+    // PA3).
+    throw new Error("agent baseUrl must not contain a query string or fragment");
+  }
   return url.toString().replace(/\/+$/, "");
 }
 
@@ -193,10 +200,21 @@ export class HttpAgentReader implements ProjectStatsReader {
       response = await this.fetchFn(`${this.baseUrl}${path}`, {
         method: "GET",
         headers: { authorization: `Bearer ${this.apiKey}` },
+        // Never follow redirects (plugin audit PA1): the operator
+        // validated THIS base URL at registration time. A redirect
+        // could send the request — from the dashboard's network
+        // position — to an origin nobody validated, so a 3xx is an
+        // upstream error, not a detour.
+        redirect: "manual",
       });
     } catch (cause) {
       throw new AgentReadError("unreachable", "plugin is unreachable", {
         detail: cause instanceof Error ? cause.message : String(cause),
+      });
+    }
+    if (response.status >= 300 && response.status < 400) {
+      throw new AgentReadError("upstream", "plugin request failed", {
+        detail: `HTTP ${response.status} redirect from ${path} (redirects are not followed)`,
       });
     }
     if (response.status === 401) {

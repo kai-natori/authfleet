@@ -55,6 +55,13 @@ describe("normalizeAgentBaseUrl", () => {
     expect(() => normalizeAgentBaseUrl("not a url")).toThrow(/not a valid URL/);
     expect(() => normalizeAgentBaseUrl("https://user:pass@app.example.com")).toThrow(/credentials/);
   });
+
+  it("rejects query strings and fragments (plugin audit PA3)", () => {
+    expect(() => normalizeAgentBaseUrl("https://app.example.com/api/auth?x=1")).toThrow(/query/);
+    expect(() => normalizeAgentBaseUrl("https://app.example.com/api/auth#frag")).toThrow(
+      /query string or fragment/,
+    );
+  });
 });
 
 describe("HttpAgentReader — happy path", () => {
@@ -126,6 +133,25 @@ describe("HttpAgentReader — typed errors (F3 discipline)", () => {
       expect(err.message).not.toContain("secret internals");
       expect(err.detail ?? "").not.toContain("secret internals");
     }
+  });
+
+  it("redirects are never followed and surface as upstream (plugin audit PA1)", async () => {
+    const { fetchFn, calls } = stubFetch(
+      () =>
+        new Response(null, {
+          status: 302,
+          headers: { location: "http://169.254.169.254/latest/meta-data" },
+        }),
+    );
+    const err = (await reader(fetchFn)
+      .getUserStats()
+      .catch((e: unknown) => e)) as AgentReadError;
+    expect(err).toBeInstanceOf(AgentReadError);
+    expect(err.kind).toBe("upstream");
+    expect(err.detail ?? "").toContain("302");
+    // Exactly one request, issued with redirect: "manual".
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.init?.redirect).toBe("manual");
   });
 
   it("newer contract version → version-mismatch naming the upgrade direction", async () => {
