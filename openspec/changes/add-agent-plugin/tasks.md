@@ -2,21 +2,21 @@
 
 ## 1. Research spike: Better Auth plugin + adapter access
 
-- [ ] Verify, against Better Auth 1.4 / 1.5 / 1.6 / 1.7, how a plugin
+- [x] Verify, against Better Auth 1.4 / 1.5 / 1.6 / 1.7, how a plugin
   endpoint handler reaches the DB adapter from its context, and note
   any per-version differences
-- [ ] Verify how the user model name and `createdAt` field name are
+- [x] Verify how the user model name and `createdAt` field name are
   resolved when an app customizes its schema (renamed model/fields,
   `additionalFields`), and what init-time schema introspection exists
-- [ ] Verify how an anonymous-flag field can be detected through the
+- [x] Verify how an anonymous-flag field can be detected through the
   adapter/schema (anonymous plugin present vs. absent)
-- [ ] Determine whether per-day signup counts can be computed through
+- [x] Determine whether per-day signup counts can be computed through
   the adapter within safe bounds (row/window caps); if not on some
   version, record the totals-only degradation from design.md
-- [ ] Verify endpoint path composition under a custom Better Auth
+- [x] Verify endpoint path composition under a custom Better Auth
   `basePath`, and a single auth check covering all `/authfleet/*`
   routes
-- [ ] Verify plugin init behaviour on missing `apiKeyHash` (fail loud
+- [x] Verify plugin init behaviour on missing `apiKeyHash` (fail loud
   at startup) and record all findings in design.md / a linked spike
   note — group 2 does not start until this group is written up
 

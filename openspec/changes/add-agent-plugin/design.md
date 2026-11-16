@@ -163,6 +163,20 @@ contract v1 degrades `dailySignups` to totals-only on that version
 (`dailySignups: []` with `totalUsers` correct) rather than dropping
 the version from the support floor.
 
+**Spike outcome (2026-11-16, see `spike.md` in this change folder):**
+all six questions answered against the published 1.4.22 / 1.5.6 /
+1.6.34 / 1.7.25 packages. `ctx.context.adapter` (`count` / `findMany`
+with logical model/field names) is identical across the range, so
+per-day signups ARE computable on every supported version — by
+in-memory bucketing, since the adapter has no group-by. The
+totals-only degradation is therefore not version-triggered; it
+applies when a stats call's signup window exceeds the recorded row
+cap (10,000 `createdAt` values), on any version, with totals staying
+exact. Anonymous detection resolves through `getAuthTables(options)`
+(the `isAnonymous` field the anonymous plugin contributes).
+Misconfiguration (missing/malformed `apiKeyHash`) throws in the
+plugin factory, failing app startup loudly.
+
 ## Decision: registry — second project type `agent`
 
 The `projects` table gains a `type` column (`'d1' | 'agent'`,
