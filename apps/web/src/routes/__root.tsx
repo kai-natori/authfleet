@@ -1,5 +1,21 @@
-import { createRootRoute, HeadContent, Link, Outlet, Scripts } from "@tanstack/react-router";
+import {
+  createRootRoute,
+  HeadContent,
+  Outlet,
+  Scripts,
+  useRouterState,
+} from "@tanstack/react-router";
 
+import { AppSidebar } from "~/components/app-sidebar";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbList,
+  BreadcrumbPage,
+} from "~/components/ui/breadcrumb";
+import { Separator } from "~/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "~/components/ui/sidebar";
+import { TooltipProvider } from "~/components/ui/tooltip";
 import appCss from "~/styles.css?url";
 
 export const Route = createRootRoute({
@@ -18,6 +34,25 @@ export const Route = createRootRoute({
   component: RootDocument,
 });
 
+/** Slim top bar inside the inset: sidebar trigger + current page label. */
+function PageHeader() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const label = pathname === "/projects" ? "Projects" : "Dashboard";
+  return (
+    <header className="flex h-14 shrink-0 items-center gap-2 border-b px-4">
+      <SidebarTrigger className="-ml-1" />
+      <Separator orientation="vertical" className="mr-2 data-[orientation=vertical]:h-4" />
+      <Breadcrumb>
+        <BreadcrumbList>
+          <BreadcrumbItem>
+            <BreadcrumbPage>{label}</BreadcrumbPage>
+          </BreadcrumbItem>
+        </BreadcrumbList>
+      </Breadcrumb>
+    </header>
+  );
+}
+
 function RootDocument() {
   return (
     <html lang="en">
@@ -25,28 +60,17 @@ function RootDocument() {
         <HeadContent />
       </head>
       <body className="min-h-dvh bg-background text-foreground antialiased">
-        <header className="border-b">
-          <div className="mx-auto flex h-14 max-w-5xl items-center gap-6 px-4">
-            <Link to="/" search={{ project: undefined }} className="font-semibold tracking-tight">
-              AuthFleet
-            </Link>
-            <nav className="flex items-center gap-4 text-sm text-muted-foreground">
-              <Link
-                to="/"
-                search={{ project: undefined }}
-                className="hover:text-foreground [&.active]:text-foreground"
-              >
-                Dashboard
-              </Link>
-              <Link to="/projects" className="hover:text-foreground [&.active]:text-foreground">
-                Projects
-              </Link>
-            </nav>
-          </div>
-        </header>
-        <main className="mx-auto max-w-5xl px-4 py-8">
-          <Outlet />
-        </main>
+        <TooltipProvider>
+          <SidebarProvider>
+            <AppSidebar />
+            <SidebarInset>
+              <PageHeader />
+              <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-6">
+                <Outlet />
+              </div>
+            </SidebarInset>
+          </SidebarProvider>
+        </TooltipProvider>
         <Scripts />
       </body>
     </html>
