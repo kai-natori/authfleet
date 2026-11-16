@@ -2,6 +2,11 @@
 
 **English** | [日本語](README.ja.md) | [简体中文](README.zh-CN.md)
 
+> **⚠️ In development — not recommended for production use.** AuthFleet is
+> pre-1.0 and under active development. APIs and data formats may change
+> without notice. Use it for evaluation and self-hosted experiments; do not
+> rely on it for production authentication data yet.
+
 **One dashboard for all your Better Auth apps — self-hosted on Cloudflare.**
 
 Register several of your own Better Auth projects and switch between them
