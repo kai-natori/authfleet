@@ -18,6 +18,16 @@ Why: Better Auth's official Infrastructure dashboard is a hosted SaaS
 per app. Nobody offered a self-hosted, multi-project switcher — so this
 exists.
 
+## Screenshots
+
+Dashboard — the built-in demo project (`AUTHFLEET_DEMO=1`), sample data:
+
+![AuthFleet dashboard with the demo project](docs/assets/dashboard.png)
+
+Projects — registration and plugin/D1 connections (demo project, sample data):
+
+![AuthFleet projects page](docs/assets/projects.png)
+
 ## Architecture
 
 ```

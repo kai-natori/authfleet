@@ -16,6 +16,16 @@ Cloudflare 账户里。
 （不是开源的），而开源的管理 UI Better Auth Studio 是嵌入到每个应用里
 的。此前没有既能自托管、又能多项目切换查看的方案——所以有了这个项目。
 
+## 截图
+
+仪表盘——内置演示项目（`AUTHFLEET_DEMO=1`）的界面，图中为示例数据：
+
+![显示演示项目的 AuthFleet 仪表盘](docs/assets/dashboard.png)
+
+项目页面——项目的注册以及插件/D1 连接管理（演示项目，示例数据）：
+
+![AuthFleet 项目页面](docs/assets/projects.png)
+
 ## 架构
 
 ```
