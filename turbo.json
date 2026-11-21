@@ -3,6 +3,10 @@
   "tasks": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
     "test": { "dependsOn": ["^build"] },
+    "@authfleet/api#test": {
+      "dependsOn": ["^build"],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/scripts/deploy*.mjs"]
+    },
     "typecheck": { "dependsOn": ["^build"] }
   }
 }

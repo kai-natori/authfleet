@@ -55,8 +55,8 @@ snapshots and the dashboard behave identically for both:
   additive within a version; a breaking change increments it and the
   dashboard keeps reading the previous one for at least one release.
 - **Plugin package version**: semver of the `authfleet` npm package.
-- **Better Auth peer range**: `>=1.4 <2`, fixture-tested on 1.4 and
-  1.7 (`packages/test-ba14` is the 1.4 matrix cell).
+- **Better Auth peer range**: `>=1.7.16 <2`, fixture-tested on 1.7.16 and
+  1.7.25 (`packages/test-ba-floor` is the minimum-version matrix cell).
 
 ## Security invariants
 

@@ -188,8 +188,8 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 注册任何真实项目之前，仪表盘就会显示一个带确定性假数据的夹具项目
 （"Demo — Acme"）。
 
-检查：`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、
-`pnpm spec:validate`。
+检查：`pnpm check`（类型、单元测试、lint、构建与规范验证）。
+`pnpm test:unit` 不包含 HTTP E2E；包含 E2E 的 `pnpm test` 留给操作员执行。
 
 ## 部署
 
@@ -235,19 +235,22 @@ git pull && pnpm install && pnpm run deploy
 ```
 
 同一命令可重复执行：保留已有 secrets，并在部署后首次 API 请求（或定时任务）前自动执行待处理迁移。
-`pnpm --filter @authfleet/api db:migrate:remote` 仍是可选手动路径，不再是前置步骤。
+无需手动执行远程 SQL；请使用包含历史数据保护的运行时自动迁移。
 迁移失败时只返回通用 503，详细错误记入服务器日志，下次请求重试；`/health` 不受影响。
 
 修改 schema 后运行 `pnpm --filter @authfleet/api db:generate`，同时生成 SQL 和静态迁移包。
 单独添加 SQL 时运行 `pnpm --filter @authfleet/api db:bundle`，将 SQL 与
 `apps/api/src/db/migrations.generated.ts` 一起提交；测试会检测不一致。
 历史记录使用兼容 Wrangler 的 `d1_migrations` 表；不要修改已应用的 SQL，请新增迁移。
+升级时请使用运行时自动迁移。旧版 `0001` SQL 若直接通过 Wrangler 应用，会因外键级联删除
+丢失快照，因此已移除 `db:migrate:remote` 快捷命令。运行时迁移在同一事务中备份并恢复快照；
+已丢失的历史需要从注册库备份恢复。本地 CLI 迁移仅用于全新的开发数据库。
 
 ## 路线图
 
 - **Agent 插件**：已实现（`packages/plugin`，端点契约 v1，已在
-  Better Auth 1.7.16 与 1.7.25 上测试）。剩下的步骤是第二轮安全审计，
-  它是首次发布到 npm 的前置门槛。
+  Better Auth 1.7.16 与 1.7.25 上测试）。首次发布前的审计已完成；
+  当前审计结果及部署验证事项见 `SECURITY-AUDIT.md`，版本变更见 `CHANGELOG.md`。
 - `apps/mcp`：在同一套 core 之上的只读 MCP 服务器（可以问你的 AI
   “我的应用现在有多少用户？”）——按设计推迟于 v1。
 - 每个项目的可选写操作（封禁/删除），带显式确认——仅在出现需求时；
@@ -260,4 +263,15 @@ npm 包通过 trusted publishing 发布，手动运行 `main` 上的 GitHub Acti
 工作流使用 Node 24、npm ≥11.5.1 和 `id-token: write`；不需要 `NODE_AUTH_TOKEN` 或
 `--provenance`（自动生成 provenance）。验证成功后可删除仓库 secret `NPM_TOKEN`。
 配置信任前包必须存在，因此仅首次由维护者通过 npm 身份认证发布，再配置 trusted publisher。
+
+0.2.0 要求 Better Auth 1.7.16 或更新版本，请先升级旧版宿主。
+发布前更新为尚未使用的版本号，并在 `CHANGELOG.md` 中记录变更。
+工作流要求 `pnpm check` 和生产依赖审计通过；检查包含类型、单元测试、lint、
+构建和规范验证，不运行 HTTP E2E。
+
+Cloudflare 自动部署使用 “Deploy to Cloudflare” 工作流。在 GitHub `production` 环境配置
+Secrets（`CLOUDFLARE_API_TOKEN`、`AUTHFLEET_OPERATOR_EMAILS`）和 Variables
+（`CLOUDFLARE_ACCOUNT_ID`、`AUTHFLEET_ACCESS_TEAM_DOMAIN`、`AUTHFLEET_ACCESS_AUD`），
+先从 `main` 手动运行。确认域名与 Access 保护后，将仓库变量
+`AUTHFLEET_DEPLOY_ENABLED` 设为 `true` 即可在 main 更新时自动部署。
 详情及 npm 文档链接见英文 README 的 “Releasing” 一节。

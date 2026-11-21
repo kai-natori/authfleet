@@ -25,6 +25,21 @@ async function migrate(db: D1Database): Promise<void> {
       .map((sql) => sql.trim())
       .filter(Boolean)
       .map((sql) => db.prepare(sql));
+    if (migration.name === "0001_lazy_cloak.sql") {
+      // D1 keeps foreign keys enabled inside batches. The legacy SQL rebuilds
+      // projects, which cascades into snapshots. Preserve them in the same
+      // transaction without changing SQL that installations already applied.
+      statements.unshift(
+        db.prepare("CREATE TABLE __authfleet_snapshot_backup AS SELECT * FROM snapshots"),
+      );
+      statements.push(
+        db.prepare(
+          `INSERT INTO snapshots (id, project_id, date, total_users, created_at)
+           SELECT id, project_id, date, total_users, created_at FROM __authfleet_snapshot_backup`,
+        ),
+        db.prepare("DROP TABLE __authfleet_snapshot_backup"),
+      );
+    }
     statements.push(db.prepare("INSERT INTO d1_migrations (name) VALUES (?)").bind(migration.name));
     try {
       await db.batch(statements);

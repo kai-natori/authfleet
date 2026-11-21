@@ -8,3 +8,7 @@ onlyBuiltDependencies:
   - lightningcss
   - sharp
   - workerd
+overrides:
+  # Patched versions for development tooling; no runtime API changes.
+  "@esbuild-kit/core-utils>esbuild": "^0.25.0"
+  "@ts-morph/common>minimatch": "^11.0.1"

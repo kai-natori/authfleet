@@ -1,5 +1,80 @@
 # AuthFleet — Security Audit
 
+## Current review — 2026-11-21 (release readiness)
+
+This section supersedes the historical status statements below. Scope: a focused
+source review of prior findings and release/deployment changes on top of
+`bc62816`, with repository unit/build verification. This is not a new comprehensive
+penetration test or a claim that deployed Cloudflare controls have been verified.
+
+### Current disposition
+
+| Area                                | Current evidence and status                                                                                                                                                                                                                                                                          |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Access identity and API allowlist   | Web verifies RS256 signature, issuer, audience, expiry and email; API requires an allowlisted operator. Added service-binding tests prove a spoofed plain email/header is not forwarded and invalid or partial Access configuration stops before the binding call, including when dev bypass is set. |
+| Credential storage and target reads | Existing project-bound AES-GCM, write-only credential responses, plugin key checks, SELECT-only D1 reads and counts-only plugin contracts remain in place. No credential format or target-write behavior changed.                                                                                    |
+| Plugin HTTP reads and CSRF          | Request/body limits, manual redirect handling and server-function CSRF middleware from the previous hardening are present. Actual Access cookie/CSRF interaction still needs operator verification.                                                                                                  |
+| Supported Better Auth versions      | Legacy 1.4 test cell was already removed on main. Plugin 0.2.0 requires `>=1.7.16 <2`; the matrix covers 1.7.16 and 1.7.25. The previously published 0.1.0 metadata still allows `>=1.4 <2`; a source change cannot rewrite that release.                                                            |
+| Release pipeline                    | Node 24, npm 11, SHA-pinned actions, main-only dispatch and OIDC publishing are implemented. Publishing now depends on repository checks and a production dependency audit. No long-lived npm token is passed to the release job.                                                                    |
+| Deployment pipeline                 | Optional main deployment and manual dispatch require checks and use the same deployment script. Deployments are serialized. Non-interactive missing credentials/settings stop before Worker deployment; existing secrets are preserved.                                                              |
+
+### Migration data loss fixed
+
+The legacy `0001_lazy_cloak.sql` rebuilds `projects` while `snapshots` references
+it with `ON DELETE CASCADE`. `PRAGMA foreign_keys=OFF` is ineffective inside D1
+batches. A populated-registry regression test failed on the previous runner:
+the existing snapshot disappeared although its project survived.
+
+The runner now copies snapshots before this legacy migration and restores them
+after the rebuild, in the same atomic batch as migration history. The regression
+test also injects a batch failure and verifies that snapshots and history roll
+back before a successful retry. Distributed SQL is unchanged. The unsafe remote
+CLI shortcut was removed; applying the historical SQL directly does not include
+the runner's safeguard. Already deleted history requires a registry backup.
+
+This is a confirmed upgrade/data-integrity defect, not a demonstrated attacker
+crossing an authorization boundary, so it is not assigned a vulnerability severity.
+
+### Dependency audit and verification
+
+Before this change, `pnpm audit` reported two moderate tooling advisories and no
+high or critical advisories: GHSA-67mh-4wv8-2f99 (`esbuild` through `drizzle-kit`)
+and GHSA-g3hv-75wg-m249 (`minimatch` through `shadcn`).
+Scoped overrides now resolve `@esbuild-kit/core-utils>esbuild` to 0.25.12 and
+`@ts-morph/common>minimatch` to 11.0.9. Full and production dependency audits
+report **no known vulnerabilities** at review time. This is a registry result,
+not a guarantee against undisclosed vulnerabilities.
+
+`pnpm check` passes: typecheck, **164 unit tests** (core 53, API 48, web 30,
+plugin 28, supported-floor matrix 5), lint, builds and five strict OpenSpec
+validations. HTTP E2E and live deployment checks were not run.
+`drizzle-kit check`, `shadcn --help` and ts-morph source-glob loading pass after the overrides;
+`shadcn info` could not complete because the upstream component registry timed
+out. The application build succeeds; component-registry connectivity was not
+established. Existing build warnings concern export condition ordering, bundle
+size and test-package output declarations. A package dry run contains only
+the plugin's compiled files, manifest, README and license.
+
+### External completion requirements
+
+- Confirm the web's exact custom domain is covered by an operator-only Access
+  policy; API must remain service-binding-only. Verify deployed JWT settings,
+  actual Access cookies/CSRF behavior, log contents and a real project connection
+  on the operator's machine. The OpenSpec runtime tasks remain unchecked.
+- The local Cloudflare OAuth credential expired and Wrangler could not refresh
+  it. No account token or intended deployment domain/Access settings were
+  available. No Cloudflare deployment was performed in this review.
+- Verify npm Trusted Publisher configuration for `kai-natori/authfleet`,
+  `publish.yml`, then run the checked publication workflow on main. Local npm
+  authentication is absent. The old workflow's plugin publication succeeded;
+  its overall failure was the since-removed `auth-fleet` nameguard step.
+- Remove the legacy GitHub `NPM_TOKEN` secret only after trusted publishing
+  succeeds. Keep the registry database and encryption key together in the
+  recovery plan; never rotate the key as part of an ordinary update.
+- Operator-selected HTTPS destinations remain configurable. Private destinations
+  are not blocked, and the localhost HTTP exception is not runtime-dev-gated.
+  No new network-isolation claim is made.
+
 ## Round 4 — 2026-11-21 (security-audit hardening)
 
 This round supersedes historical counts and open-status statements below.

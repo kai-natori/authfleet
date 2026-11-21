@@ -211,8 +211,9 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 ダミーデータのフィクスチャプロジェクト（"Demo — Acme"）がダッシュボードに
 表示されます。
 
-チェック：`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、
-`pnpm spec:validate`。
+チェック：`pnpm check`（型・ユニットテスト・lint・build・仕様検証）。
+`pnpm test:unit` は HTTP E2E を除外します。E2E を含む `pnpm test` は
+オペレーターの実動確認用です。
 
 ## デプロイ
 
@@ -262,7 +263,10 @@ git pull && pnpm install && pnpm run deploy
 
 同じコマンドを繰り返し実行できます。既存シークレットを保持し、デプロイ後最初の API リクエスト
 （または定期ジョブ）の前に未適用マイグレーションを自動適用します。
-`pnpm --filter @authfleet/api db:migrate:remote` は任意の手動経路として残りますが、必須ではありません。
+更新時は自動マイグレーションを使用してください。旧 `db:migrate:remote` コマンドは削除しました。
+旧 `0001` SQL を Wrangler で直接適用すると、外部キーの連鎖削除でスナップショットを失うためです。
+ランタイムの移行処理では、同じトランザクション内で履歴を退避・復元します。
+すでに失われた履歴の復旧には、レジストリのバックアップが必要です。
 失敗時は詳細をサーバーログに記録し、汎用 503 を返して次回再試行します。`/health` は影響を受けません。
 
 スキーマ変更時は `pnpm --filter @authfleet/api db:generate` で SQL と静的バンドルを生成します。
@@ -273,9 +277,9 @@ SQL を別途追加した場合は `pnpm --filter @authfleet/api db:bundle` を�
 ## ロードマップ
 
 - **エージェントプラグイン**：実装済みです（`packages/plugin`、エンド
-  ポイント契約 v1、Better Auth 1.7.16 と 1.7.25 でテスト済み）。残る工程は
-  第 2 ラウンドのセキュリティ監査で、これが npm への初回公開の前提に
-  なります。
+  ポイント契約 v1、Better Auth 1.7.16 と 1.7.25 でテスト済み）。
+  初回公開前の監査は完了しています。現行の監査結果と実環境の確認事項は
+  `SECURITY-AUDIT.md`、リリース差分は `CHANGELOG.md` を参照してください。
 - `apps/mcp`：同じ core の上に作る読み取り専用の MCP サーバー（AI に
   「自分のアプリ、今何人？」と聞けるようにするもの）。設計判断として
   v1 からは外しました。
@@ -291,3 +295,14 @@ npmjs.com のパッケージ設定で `kai-natori/authfleet`、`publish.yml` を
 `NPM_TOKEN` リポジトリシークレットを削除できます。信頼設定には既存パッケージが必要なので、
 初回だけ管理者が npm 認証で公開し、その後に trusted publisher を設定します。
 詳細と npm ドキュメントへのリンクは英語版 README の「Releasing」を参照してください。
+
+0.2.0 は Better Auth 1.7.16 以降が必要です。古いホストを先に更新してください。
+公開前に未使用のバージョン番号へ更新し、`CHANGELOG.md` に変更を記録します。
+公開ワークフローは `pnpm check` と本番依存関係の監査が成功した場合だけ進みます。
+`pnpm check` は HTTP E2E を除くユニットテスト・型・lint・build・仕様検証を実行します。
+
+Cloudflare 向けには「Deploy to Cloudflare」ワークフローも用意しています。
+`production` 環境に Secrets（`CLOUDFLARE_API_TOKEN`、`AUTHFLEET_OPERATOR_EMAILS`）、
+Variables（`CLOUDFLARE_ACCOUNT_ID`、`AUTHFLEET_ACCESS_TEAM_DOMAIN`、`AUTHFLEET_ACCESS_AUD`）
+を設定し、最初は `main` から手動実行してください。独自ドメインと Access 保護を確認後、
+リポジトリ変数 `AUTHFLEET_DEPLOY_ENABLED=true` で main 更新時の自動デプロイを有効にできます。
