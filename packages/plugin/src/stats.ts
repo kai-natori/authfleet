@@ -93,6 +93,19 @@ export interface ComputeStatsOptions {
   now?: Date;
 }
 
+function bucketDailySignups(rows: Record<string, unknown>[]): DailySignup[] {
+  const buckets = new Map<string, number>();
+  for (const row of rows) {
+    const createdAt = toDate(row.createdAt);
+    if (!createdAt) continue;
+    const date = createdAt.toISOString().slice(0, 10);
+    buckets.set(date, (buckets.get(date) ?? 0) + 1);
+  }
+  return [...buckets.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, count]) => ({ date, count }));
+}
+
 export async function computeStats(
   adapter: StatsAdapter,
   options: ComputeStatsOptions,
@@ -125,16 +138,7 @@ export async function computeStats(
     // partial buckets presented as complete; degrade instead (spike
     // question 4). Totals above stay exact either way.
     if (rows.length === windowCount) {
-      const buckets = new Map<string, number>();
-      for (const row of rows) {
-        const createdAt = toDate(row.createdAt);
-        if (!createdAt) continue;
-        const date = createdAt.toISOString().slice(0, 10);
-        buckets.set(date, (buckets.get(date) ?? 0) + 1);
-      }
-      dailySignups = [...buckets.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([date, count]) => ({ date, count }));
+      dailySignups = bucketDailySignups(rows);
     }
   }
 
