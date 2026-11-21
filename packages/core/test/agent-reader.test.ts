@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { AgentReadError, HttpAgentReader, normalizeAgentBaseUrl } from "../src/agent-reader";
 
 const KEY = "agent-api-key-0123456789abcdef";
@@ -99,6 +99,127 @@ describe("HttpAgentReader — happy path", () => {
 });
 
 describe("HttpAgentReader — typed errors (F3 discipline)", () => {
+  it("uses a 10-second deadline and reports aborted fetches generically", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    try {
+      const { fetchFn } = stubFetch((_url, init) => {
+        expect(init?.signal).toBe(controller.signal);
+        return new Promise((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error(KEY)));
+          controller.abort();
+        });
+      });
+      await expect(reader(fetchFn).validate()).rejects.toMatchObject({
+        kind: "unreachable",
+        message: "plugin is unreachable",
+      });
+      expect(timeout).toHaveBeenCalledWith(10_000);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("aborts a stalled response body using the same deadline", async () => {
+    const controller = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    const cancel = vi.fn();
+    try {
+      const { fetchFn } = stubFetch(
+        () =>
+          new Response(
+            new ReadableStream({
+              pull() {
+                queueMicrotask(() => controller.abort());
+              },
+              cancel,
+            }),
+          ),
+      );
+      await expect(reader(fetchFn).getUserStats()).rejects.toMatchObject({
+        kind: "unreachable",
+        message: "plugin is unreachable",
+      });
+      expect(cancel).toHaveBeenCalled();
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("bounds streamed body bytes without trusting Content-Length", async () => {
+    const cancel = vi.fn();
+    const { fetchFn } = stubFetch(() => {
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            controller.enqueue(new Uint8Array(512 * 1024));
+          },
+          cancel,
+        }),
+        { headers: { "content-length": "1" } },
+      );
+    });
+    await expect(reader(fetchFn).validate()).rejects.toMatchObject({
+      kind: "malformed",
+      message: "plugin returned a malformed response",
+    });
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it("accepts exactly 1 MiB and rejects an additional byte", async () => {
+    const json = JSON.stringify({ ok: true, version: 1 });
+    for (const extra of [0, 1]) {
+      const { fetchFn } = stubFetch(
+        () => new Response(json + " ".repeat(1024 * 1024 - json.length + extra)),
+      );
+      if (extra === 0) {
+        await expect(reader(fetchFn).validate()).resolves.toEqual({ version: 1 });
+      } else {
+        await expect(reader(fetchFn).validate()).rejects.toMatchObject({ kind: "malformed" });
+      }
+    }
+  });
+
+  it("accepts 91 UTC dates in a 90-day window and rejects 92 buckets", async () => {
+    for (const count of [0, 90, 91, 92]) {
+      const { fetchFn } = stubFetch(() =>
+        jsonResponse({
+          ...STATS_BODY,
+          dailySignups: Array.from({ length: count }, (_, day) => ({
+            date: new Date(Date.parse(STATS_BODY.asOf) - day * 86_400_000)
+              .toISOString()
+              .slice(0, 10),
+            count: 1,
+          })),
+        }),
+      );
+      if (count <= 91) {
+        expect((await reader(fetchFn).getUserStats(90)).dailySignups).toHaveLength(count);
+      } else {
+        await expect(reader(fetchFn).getUserStats(90)).rejects.toMatchObject({ kind: "malformed" });
+      }
+    }
+  });
+
+  it("reports an empty or failed body generically", async () => {
+    const empty = stubFetch(() => new Response(null));
+    await expect(reader(empty.fetchFn).validate()).rejects.toMatchObject({ kind: "malformed" });
+    const failed = stubFetch(
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error(KEY));
+            },
+          }),
+        ),
+    );
+    await expect(reader(failed.fetchFn).validate()).rejects.toMatchObject({
+      kind: "unreachable",
+      message: "plugin is unreachable",
+    });
+  });
+
   it("fetch failure → unreachable, cause kept in detail only", async () => {
     const { fetchFn } = stubFetch(() => {
       throw new Error("connect ECONNREFUSED 10.0.0.1:443");

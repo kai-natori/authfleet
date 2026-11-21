@@ -194,6 +194,7 @@ async function sha256Hex(value: string): Promise<string> {
  */
 export const generateAgentKeyFn = createServerFn({ method: "POST" }).handler(
   async (): Promise<{ apiKey: string; apiKeyHash: string }> => {
+    if (!(await operatorEmail())) throw new Error("operator identity required");
     const apiKey = generateRandomToken(32);
     return { apiKey, apiKeyHash: await sha256Hex(apiKey) };
   },
