@@ -61,16 +61,16 @@ the plugin's compiled files, manifest, README and license.
   policy; API must remain service-binding-only. Verify deployed JWT settings,
   actual Access cookies/CSRF behavior, log contents and a real project connection
   on the operator's machine. The OpenSpec runtime tasks remain unchecked.
-- The local Cloudflare OAuth credential expired and Wrangler could not refresh
-  it. No account token or intended deployment domain/Access settings were
-  available. No Cloudflare deployment was performed in this review.
-- Verify npm Trusted Publisher configuration for `kai-natori/authfleet`,
-  `publish.yml`, then run the checked publication workflow on main. Local npm
-  authentication is absent. The old workflow's plugin publication succeeded;
-  its overall failure was the since-removed `auth-fleet` nameguard step.
-- Remove the legacy GitHub `NPM_TOKEN` secret only after trusted publishing
-  succeeds. Keep the registry database and encryption key together in the
-  recovery plan; never rotate the key as part of an ordinary update.
+- Cloudflare deployment is outside this release's scope at the operator's request.
+  No deployment was performed, and automatic deployment has not been enabled.
+- npm Trusted Publisher is configured for `kai-natori/authfleet`, `publish.yml`.
+  The checked [publication workflow](https://github.com/kai-natori/authfleet/actions/runs/44891762800)
+  successfully published plugin 0.2.0 from `6a05b91` with signed provenance.
+  The legacy GitHub `NPM_TOKEN` secret was removed after that success.
+  The old 0.1.0 workflow's overall failure was its since-removed `auth-fleet`
+  nameguard step; its plugin publication had succeeded.
+- Keep the registry database and encryption key together in the recovery plan;
+  never rotate the key as part of an ordinary update.
 - Operator-selected HTTPS destinations remain configurable. Private destinations
   are not blocked, and the localhost HTTP exception is not runtime-dev-gated.
   No new network-isolation claim is made.
