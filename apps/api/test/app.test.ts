@@ -85,6 +85,40 @@ describe("operator gate", () => {
 });
 
 describe("projects CRUD", () => {
+  it("accepts empty and partial D1 updates, preserving omitted fields", async () => {
+    const app = createApp(testDeps());
+    const created = await app.request("/api/projects", {
+      method: "POST",
+      headers: OPERATOR,
+      body: JSON.stringify(projectPayload()),
+    });
+    const { project } = await created.json();
+    for (const patch of [{}, { name: " Renamed " }, { cfAccountId: CF_ACCOUNT_ID }]) {
+      const response = await app.request(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: OPERATOR,
+        body: JSON.stringify(patch),
+      });
+      expect(response.status).toBe(200);
+      const { project: updated } = await response.json();
+      expect(updated.d1DatabaseId).toBe(D1_DATABASE_ID);
+      expect(updated.tokenHint).toBe(project.tokenHint);
+    }
+    for (const patch of [
+      { name: "" },
+      { cfAccountId: "bad" },
+      { d1DatabaseId: "bad" },
+      { token: "short" },
+    ]) {
+      const response = await app.request(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        headers: OPERATOR,
+        body: JSON.stringify(patch),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toEqual({ error: "invalid project payload" });
+    }
+  });
   it("creates a project; the token is stored encrypted and never returned", async () => {
     const deps = testDeps();
     const app = createApp(deps);
