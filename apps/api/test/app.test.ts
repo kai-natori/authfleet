@@ -92,7 +92,9 @@ describe("projects CRUD", () => {
       headers: OPERATOR,
       body: JSON.stringify(projectPayload()),
     });
-    const { project } = await created.json();
+    const { project } = (await created.json()) as {
+      project: { id: string; tokenHint: string };
+    };
     for (const patch of [{}, { name: " Renamed " }, { cfAccountId: CF_ACCOUNT_ID }]) {
       const response = await app.request(`/api/projects/${project.id}`, {
         method: "PATCH",
@@ -100,7 +102,9 @@ describe("projects CRUD", () => {
         body: JSON.stringify(patch),
       });
       expect(response.status).toBe(200);
-      const { project: updated } = await response.json();
+      const { project: updated } = (await response.json()) as {
+        project: { d1DatabaseId: string; tokenHint: string };
+      };
       expect(updated.d1DatabaseId).toBe(D1_DATABASE_ID);
       expect(updated.tokenHint).toBe(project.tokenHint);
     }
