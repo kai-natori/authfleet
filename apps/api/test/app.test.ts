@@ -21,6 +21,7 @@ function projectPayload(overrides: Record<string, unknown> = {}) {
 function testDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   return {
     repo: new InMemoryProjectRepository(),
+    operatorEmails: ["op@example.com"],
     getEncryptionKey: () => importEncryptionKey(KEY_B64),
     demoEnabled: true,
     readerFactory: () => ({
@@ -36,6 +37,30 @@ function testDeps(overrides: Partial<AppDeps> = {}): AppDeps {
 }
 
 describe("operator gate", () => {
+  it.each([undefined, [], ["", "  "]])("fails closed with allowlist %j", async (operatorEmails) => {
+    const app = createApp(testDeps({ operatorEmails }));
+    for (const headers of [undefined, OPERATOR]) {
+      const res = await app.request("/api/projects", { headers });
+      expect(res.status).toBe(503);
+      expect(await res.json()).toEqual({ error: "AUTHFLEET_OPERATOR_EMAILS is not configured" });
+    }
+    expect((await app.request("/health")).status).toBe(200);
+  });
+
+  it("keeps health available and hides migration failures", async () => {
+    const app = createApp(
+      testDeps({
+        ensureMigrations: async () => {
+          throw new Error("SQL detail");
+        },
+      }),
+    );
+    expect((await app.request("/health")).status).toBe(200);
+    const res = await app.request("/api/projects", { headers: OPERATOR });
+    expect(res.status).toBe(503);
+    expect(await res.json()).toEqual({ error: "registry unavailable" });
+  });
+
   it("rejects /api calls without an operator identity", async () => {
     const app = createApp(testDeps());
     const res = await app.request("/api/projects");
@@ -49,7 +74,9 @@ describe("operator gate", () => {
   });
 
   it("dev bypass supplies a local operator", async () => {
-    const app = createApp(testDeps({ devBypass: true, devOperator: "dev@local" }));
+    const app = createApp(
+      testDeps({ devBypass: true, devOperator: "dev@local", operatorEmails: undefined }),
+    );
     const res = await app.request("/api/projects");
     expect(res.status).toBe(200);
   });

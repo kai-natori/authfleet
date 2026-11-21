@@ -1,14 +1,14 @@
 {
   "dependencies": {
     "authfleet": "workspace:*",
-    "better-auth": "1.4.22"
+    "better-auth": "1.7.16"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
   },
-  "name": "@authfleet/test-ba14",
+  "name": "@authfleet/test-ba-floor",
   "private": true,
   "scripts": {
     "build": "tsc -p tsconfig.build.json",

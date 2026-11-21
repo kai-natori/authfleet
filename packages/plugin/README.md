@@ -15,7 +15,9 @@ AuthFleet; apps on D1 don't need it (AuthFleet reads those directly).
 npm install authfleet
 ```
 
-Requires Better Auth `>=1.4 <2` (peer dependency).
+Requires Better Auth `>=1.7.16 <2` (peer dependency). The compatibility
+matrix tests the supported floor, 1.7.16, and the current development version.
+Older versions are unsupported because of published security advisories.
 
 ## Configure
 
@@ -105,4 +107,4 @@ Three independent versions, by design:
   the dashboard keeps reading the previous one for at least one
   AuthFleet release.
 - **Package version** (semver, this npm package).
-- **Better Auth peer range** (`>=1.4 <2`), tested against 1.4 and 1.7.
+- **Better Auth peer range** (`>=1.7.16 <2`), tested against 1.7.16 and 1.7.25.
