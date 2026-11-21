@@ -14,5 +14,5 @@
   // fallback read from the shell environment; production must use the API
   // service binding above. Access verification config
   // (AUTHFLEET_ACCESS_TEAM_DOMAIN / AUTHFLEET_ACCESS_AUD) is set as
-  // Worker vars/secrets at deploy time — see README "Deployment sketch".
+  // Worker vars/secrets at deploy time — see README "Deploy".
 }

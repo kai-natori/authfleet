@@ -143,9 +143,10 @@ projects, so its own posture matters.
   Access). Configure verification with `AUTHFLEET_ACCESS_TEAM_DOMAIN`
   and `AUTHFLEET_ACCESS_AUD` on the web Worker; when Access is
   configured, a missing or invalid JWT fails closed. Api rejects
-  `/api/*` calls without an email-shaped operator identity with 401,
-  and — when `AUTHFLEET_OPERATOR_EMAILS` is set on the api Worker
-  (comma-separated; **set it in production**) — rejects anyone outside
+  `/api/*` calls with 503 when `AUTHFLEET_OPERATOR_EMAILS` is unset or
+  empty (unless the explicit local dev bypass is enabled). This required
+  api Worker setting is comma-separated. With it configured, the api
+  rejects calls without an email-shaped operator identity with 401 and anyone outside
   that allowlist with 403, whatever the Access policy admits. The api
   does not echo the operator identity in responses.
 - **Credentials are encrypted at rest.** Each project's credential —
@@ -212,49 +213,100 @@ fake data before you register any real project.
 Checks: `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build`,
 `pnpm spec:validate`.
 
-## Deployment sketch
+## Deploy
 
-(One-command deploy for both Workers is a roadmap item; today it is two
-deploys in this order.)
+Prerequisites: Node ≥22, pnpm 10, installed dependencies (`pnpm install`),
+and a Cloudflare account with Workers, D1 and the required provisioning/secret
+permissions. Authenticate with `pnpm --filter @authfleet/api exec wrangler login`
+locally, or set `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in CI.
+Choose your web custom domain and create a self-hosted Cloudflare Access
+application for it (Zero Trust → Access → Applications) to obtain its audience.
 
-1. Create the registry D1 and put its id in `apps/api/wrangler.jsonc`,
-   then `pnpm --filter @authfleet/api db:migrate:remote` and
-   `pnpm --filter @authfleet/api deploy`. Set the encryption key:
-   `wrangler secret put TOKEN_ENCRYPTION_KEY` in `apps/api`, and set
-   the operator allowlist: `wrangler secret put AUTHFLEET_OPERATOR_EMAILS`
-   (your email; comma-separated if several). Do **not** set
-   `AUTHFLEET_DEV_BYPASS` here — the committed config deliberately omits
-   the flag entirely.
-2. Deploy web: `pnpm --filter @authfleet/web build && pnpm --filter @authfleet/web deploy`.
-   The web Worker's wrangler config already binds `API` to
-   `authfleet-api` via a service binding, and disables `workers.dev`
-   so web is only reachable on its custom domain.
-3. Put web behind **Cloudflare Access** (Zero Trust → Access →
-   Applications): create a self-hosted application for the web Worker's
-   domain, with an allow policy for your email only. Access is the login
-   system — AuthFleet deliberately builds no auth of its own.
-4. Tell web how to verify Access JWTs: set two vars on the web Worker —
-   `AUTHFLEET_ACCESS_TEAM_DOMAIN` (e.g. `your-team.cloudflareaccess.com`)
-   and `AUTHFLEET_ACCESS_AUD` (the audience tag shown on your Access
-   application's overview). Without them web cannot establish the
-   operator identity and the api will answer 401 (fail closed).
+```bash
+pnpm run deploy
+```
+
+Use **`pnpm run deploy`**, not `pnpm deploy` (which is a pnpm builtin).
+The command checks Wrangler authentication, builds the workspace, deploys API
+(provisioning or reusing `authfleet-registry` D1), configures missing secrets,
+then deploys web. API schema migrations run automatically at runtime.
+It never prints secret values or rotates existing secrets. It generates a
+32-byte base64 `TOKEN_ENCRYPTION_KEY` only when that secret name is absent.
+Back up the key securely; losing or replacing it orphans encrypted credentials.
+
+Missing settings are prompted for interactively. For non-interactive deployment,
+provide these environment variables when the corresponding Worker secret is absent:
+
+| Variable                       | Value                                             |
+| ------------------------------ | ------------------------------------------------- |
+| `AUTHFLEET_OPERATOR_EMAILS`    | Operator emails, comma-separated; required by API |
+| `AUTHFLEET_ACCESS_TEAM_DOMAIN` | e.g. `your-team.cloudflareaccess.com`             |
+| `AUTHFLEET_ACCESS_AUD`         | Audience from the Access application overview     |
+
+Existing secret names take precedence over environment values, including on updates.
+To intentionally change settings, use `wrangler secret put NAME` in the relevant
+app directory; do not rotate the encryption key on an existing registry.
+The script manages these settings as secrets. If an existing installation uses
+plain Worker vars for Access settings, supply their values once to migrate them.
+Never enable `AUTHFLEET_DEV_BYPASS` in production.
+
+**Manual Cloudflare step:** attach the custom domain to `authfleet-web` and ensure
+the Access application protects that exact domain with an allow policy for your
+operators only. Its team domain and audience must match the web settings.
+Both Workers keep `workers.dev` disabled; API remains service-binding-only.
+
+## Updating
+
+Back up the registry and keep its database name and encryption key unchanged, then:
+
+```bash
+git pull && pnpm install && pnpm run deploy
+```
+
+This is the same idempotent deployment command: existing secrets are preserved,
+and pending migrations apply automatically on the first API request after deploy
+(or before scheduled snapshots). `pnpm --filter @authfleet/api db:migrate:remote`
+remains an optional manual path, not a prerequisite. Failed migration initialization
+returns a generic 503 and is retried on the next request; `/health` remains available.
+
+### Registry migrations
+
+The API applies bundled registry migrations before authenticated `/api/*`
+requests and scheduled snapshots, once per isolate/database. `/health` does
+not initialize the registry. Migration failures return a generic 503 and are
+retried on the next request; details stay in server-side logs. Migration names
+are recorded in Wrangler's `d1_migrations` table, so existing CLI-migrated
+installations are recognized. `pnpm --filter @authfleet/api db:migrate:remote`
+remains an optional manual path, not a deployment prerequisite.
+
+After changing the Drizzle schema, run `pnpm --filter @authfleet/api db:generate`.
+This generates SQL and refreshes the static Worker migration bundle. If SQL files
+are added separately, run `pnpm --filter @authfleet/api db:bundle`. Commit the SQL
+and `src/db/migrations.generated.ts` together; a test detects bundle drift.
+Do not edit migrations that have already been applied; add a new migration.
 
 ## Roadmap
 
 - **Agent plugin**: implemented (`packages/plugin`, endpoint contract
-  v1, tested against Better Auth 1.4 and 1.7) — the remaining step is
+  v1, tested against Better Auth 1.7.16 and 1.7.25) — the remaining step is
   the round-2 security audit, which gates the first npm publish.
 - `apps/mcp`: a read-only MCP server over the same core (ask your AI
   "how many users does my app have?") — deferred from v1 by design.
-- One-command deploy for both Workers.
 - Optional write actions per project (ban/delete) behind explicit
   confirmation — only if demand appears; v1 is read-only by design.
 
 ## Releasing
 
-The npm package is published from GitHub Actions, never from a local
-machine. The **Publish to npm** workflow (`.github/workflows/publish.yml`)
-is dispatched manually and takes the `NPM_TOKEN` repository secret — a
-granular npm access token with publish rights for `authfleet` and 2FA
-bypass enabled. Running the workflow builds and publishes `authfleet`
-(`packages/plugin`) with provenance.
+Releases use npm trusted publishing from the manually dispatched **Publish to npm**
+workflow (`.github/workflows/publish.yml`), restricted to `main`. In the npm package's
+settings, configure a GitHub Actions trusted publisher for `kai-natori/authfleet`,
+workflow filename `publish.yml`, allowing direct `npm publish`. The workflow uses
+Node 24, npm ≥11.5.1 and `id-token: write`; no `NODE_AUTH_TOKEN` or `--provenance`
+is needed (provenance is automatic). Delete the old `NPM_TOKEN` repository secret
+after verifying trusted publishing works.
+
+The package must already exist before trust can be configured. For the first-ever
+publish only, a maintainer must bootstrap it with authenticated npm publishing,
+then configure trust and use Actions for subsequent releases. See
+[npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) and
+[package prerequisite](https://docs.npmjs.com/cli/v11/commands/npm-trust/#prerequisites).

@@ -28,6 +28,7 @@ function agentPayload(overrides: Record<string, unknown> = {}) {
 function testDeps(overrides: Partial<AppDeps> = {}): AppDeps {
   return {
     repo: new InMemoryProjectRepository(),
+    operatorEmails: ["op@example.com"],
     getEncryptionKey: () => importEncryptionKey(KEY_B64),
     agentValidate: async () => ({ version: 1 }),
     readerFactory: () => ({

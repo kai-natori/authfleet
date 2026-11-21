@@ -1,6 +1,7 @@
 import { importEncryptionKey, runSnapshotJob } from "@authfleet/core";
 import { drizzle } from "drizzle-orm/d1";
 import { type AppDeps, createApp } from "./app";
+import { ensureMigrations } from "./db/migrate";
 import { DrizzleProjectRepository } from "./db/repo";
 import * as schema from "./db/schema";
 import { createProjectReader, decryptProjectCredential } from "./reader";
@@ -22,12 +23,10 @@ export interface Env {
   AUTHFLEET_DEV_OPERATOR?: string;
   /**
    * Comma-separated operator allowlist (audit F2). Set this in
-   * production: when present, only these emails may call the api.
+   * production: required unless the explicit local dev bypass is enabled.
    */
   AUTHFLEET_OPERATOR_EMAILS?: string;
 }
-
-let warnedAboutAllowlist = false;
 
 function buildDeps(env: Env): AppDeps {
   let keyPromise: Promise<CryptoKey> | null = null;
@@ -35,15 +34,8 @@ function buildDeps(env: Env): AppDeps {
   const operatorEmails = env.AUTHFLEET_OPERATOR_EMAILS?.split(",")
     .map((e) => e.trim().toLowerCase())
     .filter((e) => e.length > 0);
-  if ((!operatorEmails || operatorEmails.length === 0) && env.AUTHFLEET_DEV_BYPASS !== "1") {
-    if (!warnedAboutAllowlist) {
-      warnedAboutAllowlist = true;
-      console.warn(
-        "AUTHFLEET_OPERATOR_EMAILS is not set: the api accepts any email-shaped operator identity forwarded by web. Set it in production (audit F2).",
-      );
-    }
-  }
   return {
+    ensureMigrations: () => ensureMigrations(env.DB),
     repo,
     getEncryptionKey: () => {
       if (!env.TOKEN_ENCRYPTION_KEY) {
@@ -68,6 +60,7 @@ export default {
   },
 
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    await ensureMigrations(env.DB);
     const deps = buildDeps(env);
     const key = await deps.getEncryptionKey();
     const results = await runSnapshotJob({

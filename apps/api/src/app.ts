@@ -37,13 +37,15 @@ export interface AppDeps {
   devBypass?: boolean;
   devOperator?: string;
   /**
-   * Operator allowlist (audit F2): when set (non-empty), only these
+   * Required operator allowlist (audit F2): only these
    * emails may call the api, whatever the Access policy in front of web
    * admits. Compared case-insensitively. Production wiring reads
-   * AUTHFLEET_OPERATOR_EMAILS; when it is unset the gate falls back to
-   * presence-only (and production wiring logs a warning) — set it.
+   * AUTHFLEET_OPERATOR_EMAILS; when unset or empty, API requests fail
+   * closed with 503 unless the explicit local dev bypass is enabled.
    */
   operatorEmails?: string[];
+  /** Production registry initialization, injectable for tests. */
+  ensureMigrations?: () => Promise<void>;
   /** Injectable for tests; defaults to the per-type reader factory. */
   readerFactory?: (project: ProjectRecord, credential: string) => ProjectStatsReader;
   /**
@@ -55,6 +57,8 @@ export interface AppDeps {
 }
 
 type Variables = { operator: string };
+
+let warnedAboutAllowlist = false;
 
 function defaultReaderFactory(project: ProjectRecord, credential: string): ProjectStatsReader {
   return createProjectReader(project, credential);
@@ -74,6 +78,13 @@ export function createApp(deps: AppDeps) {
   // Operator identity gate for everything under /api.
   const allowlist = deps.operatorEmails?.map((e) => e.trim().toLowerCase()).filter(Boolean);
   app.use("/api/*", async (c, next) => {
+    if (!allowlist?.length && !deps.devBypass) {
+      if (!warnedAboutAllowlist) {
+        warnedAboutAllowlist = true;
+        console.error("AUTHFLEET_OPERATOR_EMAILS is not configured");
+      }
+      return c.json({ error: "AUTHFLEET_OPERATOR_EMAILS is not configured" }, 503);
+    }
     const operator = c.req.header("x-authfleet-operator");
     if (operator) {
       // The identity must be email-shaped (audit F2): a bare string
@@ -94,6 +105,16 @@ export function createApp(deps: AppDeps) {
       return next();
     }
     return c.json({ error: "operator identity required" }, 401);
+  });
+
+  app.use("/api/*", async (c, next) => {
+    try {
+      await deps.ensureMigrations?.();
+    } catch (error) {
+      console.error("registry migration failed:", error);
+      return c.json({ error: "registry unavailable" }, 503);
+    }
+    return next();
   });
 
   async function findProject(id: string): Promise<ProjectRecord | null> {

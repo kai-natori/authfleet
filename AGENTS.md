@@ -5,15 +5,15 @@ for the product/security model and `openspec/` for behaviour contracts.
 
 ## Layout
 
-| Path                 | What                                                                                                                                                                                          |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/api`           | Hono Worker. Registry, stats, snapshot cron. **No public exposure** (`workers_dev: false`, no routes) — web reaches it only via service binding. Migrations in `apps/api/migrations`.         |
-| `apps/web`           | TanStack Start + shadcn/ui dashboard behind Cloudflare Access. Server-side api client in `src/server/api.ts`.                                                                                 |
-| `packages/core`      | Framework-free logic: ids, crypto, remote D1 reader, plugin HTTP reader (`HttpAgentReader`), registry contract, stats, snapshots, demo fixtures. Both readers implement `ProjectStatsReader`. |
-| `packages/plugin`    | The `authfleet` npm package: read-only, counts-only Better Auth plugin for target apps (contract v1). Never log key material; no dev bypass; no DB writes.                                    |
-| `packages/test-ba14` | Version-matrix cell: the plugin contract suite against Better Auth 1.4 (vitest aliases bind the plugin source to the 1.4 modules).                                                            |
-| `packages/test-e2e`  | True end-to-end suite: a Hono host app mounting Better Auth + the plugin, served over real HTTP (@hono/node-server), exercised by raw fetch and core's `HttpAgentReader`.                     |
-| `apps/mcp`           | Deferred. Do not create without a new OpenSpec change.                                                                                                                                        |
+| Path                     | What                                                                                                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/api`               | Hono Worker. Registry, stats, snapshot cron. **No public exposure** (`workers_dev: false`, no routes) — web reaches it only via service binding. Migrations in `apps/api/migrations`.         |
+| `apps/web`               | TanStack Start + shadcn/ui dashboard behind Cloudflare Access. Server-side api client in `src/server/api.ts`.                                                                                 |
+| `packages/core`          | Framework-free logic: ids, crypto, remote D1 reader, plugin HTTP reader (`HttpAgentReader`), registry contract, stats, snapshots, demo fixtures. Both readers implement `ProjectStatsReader`. |
+| `packages/plugin`        | The `authfleet` npm package: read-only, counts-only Better Auth plugin for target apps (contract v1). Never log key material; no dev bypass; no DB writes.                                    |
+| `packages/test-ba-floor` | Version-matrix cell: the plugin contract suite against the supported Better Auth floor, 1.7.16 (vitest aliases bind the plugin source to those modules).                                      |
+| `packages/test-e2e`      | True end-to-end suite: a Hono host app mounting Better Auth + the plugin, served over real HTTP (@hono/node-server), exercised by raw fetch and core's `HttpAgentReader`.                     |
+| `apps/mcp`               | Deferred. Do not create without a new OpenSpec change.                                                                                                                                        |
 
 ## Non-negotiables
 
@@ -24,7 +24,8 @@ for the product/security model and `openspec/` for behaviour contracts.
    except `/health`. Web derives it from the **verified** Cloudflare
    Access JWT (`apps/web/src/server/access.ts`) — never from the plain
    email header — and api enforces the `AUTHFLEET_OPERATOR_EMAILS`
-   allowlist when configured. The dev bypass (`AUTHFLEET_DEV_BYPASS`)
+   allowlist as required configuration (503 when absent outside local dev bypass).
+   The dev bypass (`AUTHFLEET_DEV_BYPASS`)
    is local-only and inert when Access verification is configured.
 3. **Read-only toward targets**: core issues `SELECT`s only against
    target D1 databases; the plugin only counts through the host app's

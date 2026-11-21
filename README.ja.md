@@ -144,9 +144,10 @@ export const auth = betterAuth({
   web Worker の `AUTHFLEET_ACCESS_TEAM_DOMAIN` と `AUTHFLEET_ACCESS_AUD`
   で行います。Access が設定されているのに JWT が無い・無効な場合は
   失敗側に倒します（fail closed）。api は、メール形式でない運用者 ID の
-  `/api/*` 呼び出しを 401 で拒否し、api Worker に
-  `AUTHFLEET_OPERATOR_EMAILS`（カンマ区切り、**本番では必ず設定して
-  ください**）が設定されていれば、Access のポリシーが通した相手でも
+  `/api/*` 呼び出しを 401 で拒否します。api Worker の必須設定
+  `AUTHFLEET_OPERATOR_EMAILS`（カンマ区切り）が未設定または空なら、
+  明示的なローカル開発バイパス以外ではすべての `/api/*` に 503 を返します。
+  設定済みなら、Access のポリシーが通した相手でも
   許可リスト外を 403 で拒否します。運用者 ID はレスポンスに echo しません。
 - **認証情報は暗号化して保存します。** 各プロジェクトの認証情報
   （`d1` プロジェクトでは Cloudflare API トークン、`agent` プロジェクト
@@ -213,48 +214,80 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 チェック：`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、
 `pnpm spec:validate`。
 
-## デプロイの概要
+## デプロイ
 
-（両 Worker のワンコマンドデプロイはロードマップ上の項目です。現在は
-この順序で 2 回デプロイします。）
+前提：Node ≥22、pnpm 10、`pnpm install` 済みで、Workers・D1 の作成と
+シークレット設定ができる Cloudflare アカウントが必要です。ローカルでは
+`pnpm --filter @authfleet/api exec wrangler login`、CI では
+`CLOUDFLARE_API_TOKEN` と `CLOUDFLARE_ACCOUNT_ID` で認証します。
+web のカスタムドメインを決め、Zero Trust → Access → Applications で
+セルフホスト型アプリを作成し、オーディエンスを取得してください。
 
-1. レジストリ D1 を作成して、その ID を `apps/api/wrangler.jsonc` に入れ、
-   `pnpm --filter @authfleet/api db:migrate:remote` と
-   `pnpm --filter @authfleet/api deploy` を実行します。暗号化キーを
-   `apps/api` で `wrangler secret put TOKEN_ENCRYPTION_KEY` として設定し、
-   運用者の許可リストも `wrangler secret put AUTHFLEET_OPERATOR_EMAILS`
-   （自分のメール。複数ならカンマ区切り）で設定します。ここでは
-   `AUTHFLEET_DEV_BYPASS` を**設定しないでください**。コミット済み設定が
-   あえてフラグ自体を省略しているのは、そのためです。
-2. web をデプロイします：`pnpm --filter @authfleet/web build && pnpm --filter @authfleet/web deploy`。
-   web Worker の wrangler 設定には `API` から `authfleet-api` への
-   サービスバインディングがすでに入っていて、`workers.dev` も無効化
-   されているので、web に到達できるのはカスタムドメインだけです。
-3. web を **Cloudflare Access** の内側に置きます（Zero Trust → Access →
-   Applications）。web Worker のドメイン向けにセルフホスト型アプリを
-   作成し、許可ポリシーは自分のメールだけにします。ログインの仕組みは
-   Access で、AuthFleet 自身は認証をあえて実装していません。
-4. web に Access JWT の検証方法を教えます。web Worker に 2 つの変数を
-   設定します：`AUTHFLEET_ACCESS_TEAM_DOMAIN`（例：
-   `your-team.cloudflareaccess.com`）と `AUTHFLEET_ACCESS_AUD`
-   （Access アプリケーションの概要に表示されるオーディエンスタグ）。
-   これらが無いと web は運用者を特定できず、api は 401 を返します
-   （fail closed）。
+```bash
+pnpm run deploy
+```
+
+`pnpm deploy` は pnpm 自体のコマンドなので、必ず **`pnpm run deploy`** を使います。
+認証確認 → ビルド → api デプロイ → 不足シークレット設定 → web デプロイを行います。
+Wrangler が `authfleet-registry` D1 を自動作成または再利用し、マイグレーションは
+実行時に適用されます。既存シークレットは変更せず、値も表示しません。
+`TOKEN_ENCRYPTION_KEY` が存在しない場合だけ 32 バイトのランダム鍵を base64 で生成します。
+鍵は安全にバックアップしてください。紛失・置換すると保存済み認証情報を復号できません。
+
+不足設定は対話入力します。非対話環境では、対応するシークレットが未設定の場合に
+以下の環境変数が必要です。
+
+| 変数                           | 値                                     |
+| ------------------------------ | -------------------------------------- |
+| `AUTHFLEET_OPERATOR_EMAILS`    | 運用者メール（カンマ区切り、api 必須） |
+| `AUTHFLEET_ACCESS_TEAM_DOMAIN` | 例：`your-team.cloudflareaccess.com`   |
+| `AUTHFLEET_ACCESS_AUD`         | Access アプリ概要のオーディエンス      |
+
+更新時も既存シークレットが環境変数より優先されます。設定を意図的に変更する場合は、
+各 app ディレクトリで `wrangler secret put NAME` を使います。既存の暗号化鍵は変更しないでください。
+Access 設定を通常の Worker vars で管理していた場合は、同じ値を一度入力してシークレットに移行します。
+本番では `AUTHFLEET_DEV_BYPASS` を設定しないでください。
+
+**Cloudflare 側の手動作業：** カスタムドメインを `authfleet-web` に紐付け、同じドメインを
+Access アプリで保護し、運用者だけを許可します。チームドメインとオーディエンスを web 設定と
+一致させてください。両 Worker の `workers.dev` は無効のままで、api はサービスバインディング専用です。
+
+## 更新
+
+レジストリをバックアップし、DB 名と暗号化鍵を維持したまま実行します。
+
+```bash
+git pull && pnpm install && pnpm run deploy
+```
+
+同じコマンドを繰り返し実行できます。既存シークレットを保持し、デプロイ後最初の API リクエスト
+（または定期ジョブ）の前に未適用マイグレーションを自動適用します。
+`pnpm --filter @authfleet/api db:migrate:remote` は任意の手動経路として残りますが、必須ではありません。
+失敗時は詳細をサーバーログに記録し、汎用 503 を返して次回再試行します。`/health` は影響を受けません。
+
+スキーマ変更時は `pnpm --filter @authfleet/api db:generate` で SQL と静的バンドルを生成します。
+SQL を別途追加した場合は `pnpm --filter @authfleet/api db:bundle` を実行し、SQL と
+`apps/api/src/db/migrations.generated.ts` を一緒にコミットします。テストが不一致を検出します。
+履歴は Wrangler 互換の `d1_migrations` に記録されます。適用済み SQL は編集せず、新規追加してください。
 
 ## ロードマップ
 
 - **エージェントプラグイン**：実装済みです（`packages/plugin`、エンド
-  ポイント契約 v1、Better Auth 1.4 と 1.7 でテスト済み）。残る工程は
+  ポイント契約 v1、Better Auth 1.7.16 と 1.7.25 でテスト済み）。残る工程は
   第 2 ラウンドのセキュリティ監査で、これが npm への初回公開の前提に
   なります。
 - `apps/mcp`：同じ core の上に作る読み取り専用の MCP サーバー（AI に
   「自分のアプリ、今何人？」と聞けるようにするもの）。設計判断として
   v1 からは外しました。
-- 両 Worker のワンコマンドデプロイ。
 - プロジェクトごとの書き込み操作（BAN／削除）を、明示的な確認を挟んで
   任意で提供 — 需要が出た場合のみ。v1 は設計として読み取り専用です。
 
 ## リリース
 
-npm パッケージの公開は GitHub Actions から手動で行います（初回公開を
-含む）。手順は英語版 README の「Releasing」を参照してください。
+npm の trusted publishing を使い、`main` 上の GitHub Actions「Publish to npm」を手動実行します。
+npmjs.com のパッケージ設定で `kai-natori/authfleet`、`publish.yml` を trusted publisher として登録し、
+`npm publish` を許可してください。Node 24、npm ≥11.5.1、`id-token: write` を使用し、
+`NODE_AUTH_TOKEN` と `--provenance` は不要です（provenance は自動生成）。動作確認後に
+`NPM_TOKEN` リポジトリシークレットを削除できます。信頼設定には既存パッケージが必要なので、
+初回だけ管理者が npm 認証で公開し、その後に trusted publisher を設定します。
+詳細と npm ドキュメントへのリンクは英語版 README の「Releasing」を参照してください。

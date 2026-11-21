@@ -14,10 +14,11 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "deploy": "node scripts/deploy.mjs",
     "format": "biome format --write .",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "spec:validate": "openspec validate add-authfleet-v1 --strict && openspec validate add-agent-plugin --strict && openspec validate harden-security-audit-2 --strict",
+    "spec:validate": "openspec validate add-authfleet-v1 --strict && openspec validate add-agent-plugin --strict && openspec validate streamline-setup-deploy --strict && openspec validate harden-security-audit-2 --strict",
     "test": "turbo run test",
     "typecheck": "turbo run typecheck"
   },
