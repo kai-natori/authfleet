@@ -138,6 +138,31 @@ export interface RemoteD1ReaderOptions {
 
 const ANON_COLUMNS = ["is_anonymous", "isAnonymous", "is_anon"] as const;
 
+function dailySignupsQuery(
+  table: string,
+  column: string,
+  sample: unknown,
+  days: number,
+  now: number,
+): { sql: string; cutoff: number | string } {
+  let sql: string;
+  let cutoff: number | string;
+  if (typeof sample === "number") {
+    // Epoch: milliseconds are ~1e12, seconds ~1e9.
+    const isMillis = sample > 1e11;
+    const divisor = isMillis ? 1000 : 1;
+    const cutoffMs = now - days * DAY_MS;
+    cutoff = isMillis ? cutoffMs : Math.floor(cutoffMs / 1000);
+    sql = `SELECT date("${column}" / ${divisor}, 'unixepoch') AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
+  } else {
+    // ISO-ish text timestamps: lexicographic cutoff works.
+    cutoff = new Date(now - days * DAY_MS).toISOString().slice(0, 10);
+    sql = `SELECT substr("${column}", 1, 10) AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
+  }
+
+  return { sql, cutoff };
+}
+
 export class RemoteD1Reader implements ProjectStatsReader {
   private readonly accountId: string;
   private readonly databaseId: string;
@@ -234,21 +259,7 @@ export class RemoteD1Reader implements ProjectStatsReader {
     const sample = probe[0]?.v;
     if (sample === undefined || sample === null) return [];
 
-    const now = Date.now();
-    let sql: string;
-    let cutoff: number | string;
-    if (typeof sample === "number") {
-      // Epoch: milliseconds are ~1e12, seconds ~1e9.
-      const isMillis = sample > 1e11;
-      const divisor = isMillis ? 1000 : 1;
-      const cutoffMs = now - days * DAY_MS;
-      cutoff = isMillis ? cutoffMs : Math.floor(cutoffMs / 1000);
-      sql = `SELECT date("${column}" / ${divisor}, 'unixepoch') AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
-    } else {
-      // ISO-ish text timestamps: lexicographic cutoff works.
-      cutoff = new Date(now - days * DAY_MS).toISOString().slice(0, 10);
-      sql = `SELECT substr("${column}", 1, 10) AS day, COUNT(*) AS n FROM "${table}" WHERE "${column}" >= ? GROUP BY day ORDER BY day ASC`;
-    }
+    const { sql, cutoff } = dailySignupsQuery(table, column, sample, days, Date.now());
     const rows = await this.query(sql, [cutoff]);
     return rows
       .filter((r) => typeof r.day === "string")

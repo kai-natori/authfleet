@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { D1ReadError, RemoteD1Reader } from "../src/d1-reader";
 
 interface ScriptStep {
@@ -29,6 +29,59 @@ function reader(steps: ScriptStep[], calls: { sql: string }[]) {
 }
 
 describe("RemoteD1Reader", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    [1762000000, "/ 1, 'unixepoch')", 1762257600],
+    [1762000000000, "/ 1000, 'unixepoch')", 1762257600000],
+    ["2026-11-01T00:00:00.000Z", 'substr("createdAt", 1, 10)', "2026-11-04"],
+  ])("preserves signup SQL and cutoff for %s", async (sample, fragment, cutoff) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2025-11-05T12:00:00.000Z"));
+    const calls: { sql: string; params?: unknown[] }[] = [];
+    const fetchFn = async (_url: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      calls.push(body);
+      const rows = body.sql.includes("sqlite_master")
+        ? [{ name: "user" }]
+        : body.sql.includes("pragma_table_info")
+          ? [{ name: "createdAt" }]
+          : body.sql.includes("LIMIT 1")
+            ? [{ v: sample }]
+            : body.sql.includes("GROUP BY")
+              ? [
+                  { day: "2025-11-05", n: 2 },
+                  { day: null, n: 1 },
+                ]
+              : [{ n: 3 }];
+      return { json: async () => ({ success: true, result: [{ results: rows }] }) } as Response;
+    };
+    const r = new RemoteD1Reader({
+      accountId: "acct",
+      databaseId: "db",
+      token: "test-token",
+      fetchFn: fetchFn as typeof fetch,
+    });
+    expect((await r.getUserStats(1)).dailySignups).toEqual([{ date: "2025-11-05", count: 2 }]);
+    const grouped = calls.find((c) => c.sql.includes("GROUP BY"));
+    expect(grouped?.sql).toContain(fragment);
+    expect(grouped?.params).toEqual([typeof cutoff === "string" ? "2025-11-04" : cutoff]);
+  });
+
+  it("returns no buckets and skips the aggregate for an empty timestamp probe", async () => {
+    const calls: { sql: string }[] = [];
+    const stats = await reader(
+      [
+        { match: "sqlite_master", rows: [{ name: "user" }] },
+        { match: "pragma_table_info", rows: [{ name: "created_at" }] },
+        { match: "COUNT(*)", rows: [{ n: 0 }] },
+        { match: "LIMIT 1", rows: [] },
+      ],
+      calls,
+    ).getUserStats();
+    expect(stats.dailySignups).toEqual([]);
+    expect(calls.some((c) => c.sql.includes("GROUP BY"))).toBe(false);
+  });
   it("reads totals, anonymous split and daily signups (epoch ms)", async () => {
     const calls: { sql: string }[] = [];
     const r = reader(

@@ -97,6 +97,67 @@ const NOW = new Date("2026-11-15T12:00:00.000Z");
 const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000);
 
 describe("computeStats", () => {
+  it("buckets mixed timestamp representations and ignores invalid dates", async () => {
+    const rows = [
+      { createdAt: "2026-11-15T01:00:00Z" },
+      { createdAt: new Date("2026-11-14T23:00:00Z") },
+      { createdAt: Date.parse("2026-11-15T02:00:00Z") },
+      { createdAt: "invalid" },
+      { createdAt: new Date("invalid") },
+      { createdAt: null },
+    ];
+    const stats = await computeStats(
+      {
+        count: async () => rows.length,
+        findMany: async () => rows,
+      },
+      { days: 30, hasAnonymousField: false, now: NOW },
+    );
+    expect(stats.dailySignups).toEqual([
+      { date: "2026-11-14", count: 1 },
+      { date: "2026-11-15", count: 2 },
+    ]);
+  });
+
+  it.each([0, 10_001])("does not fetch signup rows for a window count of %s", async (count) => {
+    const stats = await computeStats(
+      {
+        count: async () => count,
+        findMany: async () => {
+          throw new Error("unexpected row fetch");
+        },
+      },
+      { days: 30, hasAnonymousField: false, now: NOW },
+    );
+    expect(stats.totalUsers).toBe(count);
+    expect(stats.dailySignups).toEqual([]);
+  });
+
+  it("degrades truncated signup reads to empty buckets", async () => {
+    const stats = await computeStats(
+      {
+        count: async () => 2,
+        findMany: async () => [{ createdAt: NOW }],
+      },
+      { days: 30, hasAnonymousField: false, now: NOW },
+    );
+    expect(stats.totalUsers).toBe(2);
+    expect(stats.dailySignups).toEqual([]);
+  });
+
+  it("propagates adapter errors", async () => {
+    await expect(
+      computeStats(
+        {
+          count: async () => 1,
+          findMany: async () => {
+            throw new Error("adapter failed");
+          },
+        },
+        { days: 30, hasAnonymousField: false, now: NOW },
+      ),
+    ).rejects.toThrow("adapter failed");
+  });
   it("counts totals, anonymous split and daily buckets", async () => {
     const users: FakeUser[] = [
       { createdAt: daysAgo(0), isAnonymous: false },
