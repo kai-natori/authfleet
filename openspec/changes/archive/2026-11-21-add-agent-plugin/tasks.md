@@ -121,6 +121,9 @@
 - [x] Findings written to `SECURITY-AUDIT.md` (round 2 section) and
   fixes applied before the plugin is published to npm
 - [x] Unit tests / typecheck / lint / build run and recorded
-- [ ] Runtime verification on the operator's Mac (fixture app +
-  dashboard against a real non-D1 project) — by design not done in
-  CI/sandbox
+
+Scope at release closure: the planned operator runtime verification (fixture app
+and dashboard against a real non-D1 project) was **not performed**. The owner-only
+check remains unchecked in `docs/operator-verification.md` for a future
+installation. It is deferred outside this implementation change, not marked
+complete by this archive.

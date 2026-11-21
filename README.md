@@ -329,6 +329,10 @@ Do not edit migrations that have already been applied; add a new migration.
 - Optional write actions per project (ban/delete) behind explicit
   confirmation — only if demand appears; v1 is read-only by design.
 
+Deployment-specific checks remain in the
+[operator verification checklist](docs/operator-verification.md).
+They have not been performed for this release.
+
 ## Releasing
 
 Releases use npm trusted publishing from the manually dispatched **Publish to npm**

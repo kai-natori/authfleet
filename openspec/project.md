@@ -60,16 +60,26 @@ snapshots and the dashboard behave identically for both:
 
 ## Specification status and validation
 
-Run `pnpm spec:validate` to validate all changes and materialized specifications
-with strict validation. At release 0.2.0 there are five active changes and no
-materialized `openspec/specs/` documents yet. Validation is not evidence that
-every scenario has been exercised against a deployment.
+Run `pnpm spec:validate` to validate all active changes and current specifications
+strictly, then check task completion in archived changes. The five implementation
+changes for 0.2.0 are archived under `openspec/changes/archive/`; there are no
+active changes at release closure. The current specifications are:
 
-`add-authfleet-v1` and `add-agent-plugin` retain unchecked operator runtime tasks.
-Do not mark those tasks complete or archive them as verified without the recorded
-runtime checks. When ready, archive `add-authfleet-v1` before `add-agent-plugin`:
-the latter modifies the former's `authfleet` requirements. Until then, the
-validator reports an informational message about the absent base specification.
+- [Dashboard](specs/authfleet/spec.md)
+- [Agent plugin](specs/agent-plugin/spec.md)
+- [Release readiness](specs/release-readiness/spec.md)
+
+The two operator runtime checks from `add-authfleet-v1` and `add-agent-plugin`
+were explicitly deferred outside the implementation changes because deployment
+was excluded. They remain unchecked in
+[the operator verification checklist](../docs/operator-verification.md).
+Archive records retain that scope decision; no runtime task was marked as
+executed. Do not claim deployment verification without completing that checklist.
+
+The archive was applied in dependency order: `add-authfleet-v1`,
+`add-agent-plugin`, `streamline-setup-deploy`, `harden-security-audit-2`,
+then `finish-release-readiness`. The base specification now exists, so the
+previous archive-order INFO is resolved.
 
 Read the original proposals in order with the later changes. The original
 plugin's `>=1.4 <2` range is historical: `streamline-setup-deploy` supersedes it

@@ -5,7 +5,7 @@ import { createFixture, FIXTURE_KEY, type FixtureUser } from "./fixture";
 /**
  * Contract tests for the plugin, run against a real Better Auth app on
  * SQLite (non-D1). The response shapes asserted here ARE contract v1 —
- * see openspec/changes/add-agent-plugin/specs/agent-plugin/spec.md.
+ * see openspec/specs/agent-plugin/spec.md.
  */
 
 const NOW = new Date();

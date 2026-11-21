@@ -20,7 +20,7 @@ database, reset on failure, and track filenames in Wrangler-compatible
 #### Scenario: Existing CLI history
 
 - WHEN all bundled migrations have Wrangler-style history rows
-- THEN no migration SQL is reapplied and optional CLI migrations remain compatible
+- THEN no migration SQL is reapplied and Wrangler migration history remains compatible
 
 #### Scenario: Failed migration
 
