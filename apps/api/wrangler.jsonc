@@ -4,7 +4,6 @@
   "d1_databases": [
     {
       "binding": "DB",
-      "database_id": "00000000-0000-0000-0000-000000000000",
       "database_name": "authfleet-registry",
       "migrations_dir": "migrations"
     }

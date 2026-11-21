@@ -131,9 +131,9 @@ export const auth = betterAuth({
   Access 就到达 Worker 的路径上它都可伪造）。在 web Worker 上通过
   `AUTHFLEET_ACCESS_TEAM_DOMAIN` 和 `AUTHFLEET_ACCESS_AUD` 配置校验；
   配置了 Access 后，JWT 缺失或无效一律失败关闭（fail closed）。api 对
-  没有邮箱格式运营者身份的 `/api/*` 调用返回 401；当 api Worker 上
-  设置了 `AUTHFLEET_OPERATOR_EMAILS`（逗号分隔，**生产环境务必设置**）
-  时，无论 Access 策略放行了谁，名单之外的人一律 403。api 不会在
+  没有邮箱格式运营者身份的 `/api/*` 调用返回 401。api Worker 必须设置
+  `AUTHFLEET_OPERATOR_EMAILS`（逗号分隔）；未设置或为空时，除显式本地开发
+  旁路外，所有 `/api/*` 调用一律返回 503。设置后，无论 Access 策略放行了谁，名单之外的人一律 403。api 不会在
   响应中回显运营者身份。
 - **凭据加密存储。** 每个项目的凭据——`d1` 项目是 Cloudflare API
   令牌，`agent` 项目是插件 API 密钥——在写入 D1 之前都经过 AES-GCM
@@ -191,43 +191,73 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 检查：`pnpm typecheck`、`pnpm test`、`pnpm lint`、`pnpm build`、
 `pnpm spec:validate`。
 
-## 部署概要
+## 部署
 
-（两个 Worker 一键部署是路线图项目；目前按以下顺序部署两次。）
+前提：Node ≥22、pnpm 10、已执行 `pnpm install`，以及具备 Workers、D1 创建与
+secret 设置权限的 Cloudflare 账号。本地使用
+`pnpm --filter @authfleet/api exec wrangler login` 登录；CI 设置
+`CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID`。
+先选择 web 自定义域名，在 Zero Trust → Access → Applications 创建自托管应用并获取受众。
 
-1. 创建注册表 D1 并把它的 id 填入 `apps/api/wrangler.jsonc`，然后
-   `pnpm --filter @authfleet/api db:migrate:remote` 和
-   `pnpm --filter @authfleet/api deploy`。设置加密密钥：在 `apps/api`
-   里执行 `wrangler secret put TOKEN_ENCRYPTION_KEY`；再设置运营者
-   白名单：`wrangler secret put AUTHFLEET_OPERATOR_EMAILS`（你的邮箱；
-   多个用逗号分隔）。这里**不要**设置 `AUTHFLEET_DEV_BYPASS`——已提交
-   的配置特意完全省略了这个标志。
-2. 部署 web：`pnpm --filter @authfleet/web build && pnpm --filter @authfleet/web deploy`。
-   web Worker 的 wrangler 配置已经通过服务绑定把 `API` 绑到
-   `authfleet-api`，并禁用了 `workers.dev`，所以 web 只能通过它的
-   自定义域名访问。
-3. 把 web 放到 **Cloudflare Access** 之后（Zero Trust → Access →
-   Applications）：为 web Worker 的域名创建一个自托管应用，允许策略
-   只放行你自己的邮箱。登录系统就是 Access——AuthFleet 有意不自建
-   任何认证。
-4. 告诉 web 如何校验 Access JWT：在 web Worker 上设置两个变量——
-   `AUTHFLEET_ACCESS_TEAM_DOMAIN`（例如
-   `your-team.cloudflareaccess.com`）和 `AUTHFLEET_ACCESS_AUD`
-   （你的 Access 应用概览页上显示的受众标签）。没有它们，web 无法
-   确定运营者身份，api 会返回 401（失败关闭）。
+```bash
+pnpm run deploy
+```
+
+必须使用 **`pnpm run deploy`**，而非 pnpm 内置的 `pnpm deploy`。
+命令依次检查登录、构建、部署 api、配置缺失的 secrets、部署 web。
+Wrangler 自动创建或复用 `authfleet-registry` D1，数据库迁移在运行时自动执行。
+已有 secrets 不会被覆盖，值也不会打印。只有缺少 `TOKEN_ENCRYPTION_KEY` 时才生成
+32 字节随机密钥并以 base64 保存。请安全备份密钥；丢失或更换会导致已存凭据无法解密。
+
+缺失设置会交互提示；非交互环境中，对应 Worker secret 不存在时必须提供以下环境变量：
+
+| 变量                           | 值                                  |
+| ------------------------------ | ----------------------------------- |
+| `AUTHFLEET_OPERATOR_EMAILS`    | 运营者邮箱，逗号分隔，api 必填      |
+| `AUTHFLEET_ACCESS_TEAM_DOMAIN` | 如 `your-team.cloudflareaccess.com` |
+| `AUTHFLEET_ACCESS_AUD`         | Access 应用概览中的受众             |
+
+更新时已有 secret 优先于环境变量。要主动修改设置，在对应 app 目录执行
+`wrangler secret put NAME`；不要更换现有注册表的加密密钥。
+如果现有安装使用普通 Worker vars 保存 Access 设置，请首次提供相同值以迁移为 secrets。
+生产环境不要设置 `AUTHFLEET_DEV_BYPASS`。
+
+**Cloudflare 手动步骤：** 将自定义域名绑定到 `authfleet-web`，确保 Access 应用保护同一域名，
+仅允许运营者访问，且团队域名和受众与 web 设置一致。两个 Worker 均保持禁用 `workers.dev`；
+api 仍然只能通过服务绑定访问。
+
+## 更新
+
+先备份注册表，保持数据库名称与加密密钥不变，然后执行：
+
+```bash
+git pull && pnpm install && pnpm run deploy
+```
+
+同一命令可重复执行：保留已有 secrets，并在部署后首次 API 请求（或定时任务）前自动执行待处理迁移。
+`pnpm --filter @authfleet/api db:migrate:remote` 仍是可选手动路径，不再是前置步骤。
+迁移失败时只返回通用 503，详细错误记入服务器日志，下次请求重试；`/health` 不受影响。
+
+修改 schema 后运行 `pnpm --filter @authfleet/api db:generate`，同时生成 SQL 和静态迁移包。
+单独添加 SQL 时运行 `pnpm --filter @authfleet/api db:bundle`，将 SQL 与
+`apps/api/src/db/migrations.generated.ts` 一起提交；测试会检测不一致。
+历史记录使用兼容 Wrangler 的 `d1_migrations` 表；不要修改已应用的 SQL，请新增迁移。
 
 ## 路线图
 
 - **Agent 插件**：已实现（`packages/plugin`，端点契约 v1，已在
-  Better Auth 1.4 与 1.7 上测试）。剩下的步骤是第二轮安全审计，
+  Better Auth 1.7.16 与 1.7.25 上测试）。剩下的步骤是第二轮安全审计，
   它是首次发布到 npm 的前置门槛。
 - `apps/mcp`：在同一套 core 之上的只读 MCP 服务器（可以问你的 AI
   “我的应用现在有多少用户？”）——按设计推迟于 v1。
-- 两个 Worker 一键部署。
 - 每个项目的可选写操作（封禁/删除），带显式确认——仅在出现需求时；
   v1 按设计是只读的。
 
 ## 发布
 
-npm 包通过 GitHub Actions 手动发布（包括首次发布）。步骤见英文版
-README 的 “Releasing” 一节。
+npm 包通过 trusted publishing 发布，手动运行 `main` 上的 GitHub Actions “Publish to npm”。
+在 npmjs.com 包设置中配置 trusted publisher：`kai-natori/authfleet`、`publish.yml`，允许 `npm publish`。
+工作流使用 Node 24、npm ≥11.5.1 和 `id-token: write`；不需要 `NODE_AUTH_TOKEN` 或
+`--provenance`（自动生成 provenance）。验证成功后可删除仓库 secret `NPM_TOKEN`。
+配置信任前包必须存在，因此仅首次由维护者通过 npm 身份认证发布，再配置 trusted publisher。
+详情及 npm 文档链接见英文 README 的 “Releasing” 一节。

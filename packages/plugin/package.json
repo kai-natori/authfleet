@@ -27,7 +27,7 @@
   "main": "./dist/index.js",
   "name": "authfleet",
   "peerDependencies": {
-    "better-auth": ">=1.4 <2"
+    "better-auth": ">=1.7.16 <2"
   },
   "publishConfig": {
     "access": "public"
