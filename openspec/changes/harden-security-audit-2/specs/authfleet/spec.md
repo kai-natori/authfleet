@@ -4,7 +4,8 @@
 
 The dashboard SHALL apply a 10-second deadline covering each plugin fetch
 and response body, consume at most 1 MiB of response bytes, and accept at
-most 90 daily signup buckets. Violations SHALL produce generic typed
+most 91 daily signup buckets, including both boundary UTC dates of a
+90-day rolling window. Violations SHALL produce generic typed
 errors without forwarding upstream content.
 
 #### Scenario: Stalled target
@@ -14,8 +15,13 @@ errors without forwarding upstream content.
 
 #### Scenario: Oversized response
 
-- WHEN a plugin body exceeds 1 MiB or contains more than 90 daily buckets
+- WHEN a plugin body exceeds 1 MiB or contains more than 91 daily buckets
 - THEN the read fails as a malformed plugin response
+
+#### Scenario: Rolling window crosses 91 UTC dates
+
+- WHEN a valid 90-day plugin response includes both boundary UTC dates
+- THEN all 91 daily signup buckets are accepted
 
 #### Scenario: Empty signup series
 

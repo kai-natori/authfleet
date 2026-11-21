@@ -7,7 +7,8 @@ inputs and web server functions also need explicit security boundaries.
 
 ## What Changes
 
-- Bound plugin requests to 10 seconds, 1 MiB and 90 daily buckets.
+- Bound plugin requests to 10 seconds, 1 MiB and 91 daily buckets
+  (a 90-day rolling window can include both boundary UTC dates).
 - Require an operator identity before generating plugin keys.
 - Install CSRF middleware for dashboard server functions.
 - Pin release actions and restrict publishing to main.

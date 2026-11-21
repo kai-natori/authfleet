@@ -180,18 +180,23 @@ describe("HttpAgentReader — typed errors (F3 discipline)", () => {
     }
   });
 
-  it("accepts zero or 90 daily buckets and rejects 91", async () => {
-    for (const count of [0, 90, 91]) {
+  it("accepts 91 UTC dates in a 90-day window and rejects 92 buckets", async () => {
+    for (const count of [0, 90, 91, 92]) {
       const { fetchFn } = stubFetch(() =>
         jsonResponse({
           ...STATS_BODY,
-          dailySignups: Array.from({ length: count }, () => ({ date: "2026-11-15", count: 1 })),
+          dailySignups: Array.from({ length: count }, (_, day) => ({
+            date: new Date(Date.parse(STATS_BODY.asOf) - day * 86_400_000)
+              .toISOString()
+              .slice(0, 10),
+            count: 1,
+          })),
         }),
       );
-      if (count <= 90) {
-        expect((await reader(fetchFn).getUserStats()).dailySignups).toHaveLength(count);
+      if (count <= 91) {
+        expect((await reader(fetchFn).getUserStats(90)).dailySignups).toHaveLength(count);
       } else {
-        await expect(reader(fetchFn).getUserStats()).rejects.toMatchObject({ kind: "malformed" });
+        await expect(reader(fetchFn).getUserStats(90)).rejects.toMatchObject({ kind: "malformed" });
       }
     }
   });

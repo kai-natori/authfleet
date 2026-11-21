@@ -164,9 +164,9 @@ function parseStatsBody(body: unknown): UserStats {
       contractVersion: version,
     });
   }
-  if (!Array.isArray(dailySignups) || dailySignups.length > MAX_DAYS) {
+  if (!Array.isArray(dailySignups) || dailySignups.length > MAX_DAYS + 1) {
     throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: dailySignups must be an array of at most 90 buckets",
+      detail: "stats: dailySignups must be an array of at most 91 buckets",
       contractVersion: version,
     });
   }
