@@ -1,5 +1,86 @@
 # AuthFleet — Security Audit
 
+## Round 4 — 2026-11-21 (security-audit hardening)
+
+This round supersedes historical counts and open-status statements below.
+Static review found no demonstrated critical/high application vulnerability
+in the documented single-operator, service-binding deployment. Live Access,
+hostname reachability and Workers Logs settings were not inspected.
+
+### Findings and fixes
+
+| Finding                                 | Severity                               | Evidence / impact                                                                                                                                                                                                        | Fix                                                                                                                                                                                                                                                                        |
+| --------------------------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unbounded plugin reads                  | Low                                    | `packages/core/src/agent-reader.ts`: registration, stats and snapshots fetched and parsed target responses without a deadline, body limit or bucket cap. A compromised registered target could exhaust Worker resources. | A 10-second AbortSignal deadline covers fetch and body consumption; streamed bytes are capped at 1 MiB; daily buckets are capped at 90. Violations return generic typed errors. Tests cover fetch/body aborts, byte boundaries, missing/failed bodies and 0/90/91 buckets. |
+| Mutable release action tags             | Low                                    | `.github/workflows/publish.yml`: upstream tag compromise could execute code in the npm release job. Provenance does not make compromised inputs safe.                                                                    | Checkout, pnpm setup and Node setup pinned to full SHAs resolved with GitHub's commits API for their v4 tags.                                                                                                                                                              |
+| Non-main release dispatch               | Low                                    | `.github/workflows/publish.yml`: authorized dispatchers could publish an unreviewed non-main ref using the npm secret.                                                                                                   | Publish job restricted to `refs/heads/main`.                                                                                                                                                                                                                               |
+| Ungated key generation                  | Low (defense in depth)                 | `apps/web/src/server/api.ts`: the key-generation server function bypassed application-level JWT resolution. It exposed fresh randomness, not stored credentials.                                                         | Require the same operator identity resolver as dashboard operations before generating a key; tests cover absent, verified and rejected identities.                                                                                                                         |
+| Missing server-function CSRF middleware | Hardening; deployed exploit unverified | `apps/web/src/start.ts` was absent. Installed TanStack Start's server-function handler accepts forms and warns when middleware is missing. Useful destructive cross-site requests were not demonstrated.                 | Install `createCsrfMiddleware` for `handlerType === "serverFn"`; deployment cookie/Access behavior still requires operator-machine verification.                                                                                                                           |
+
+### Dependency audit
+
+`pnpm install` and `pnpm audit` succeeded on this machine. The initial
+main baseline reported **15 vulnerabilities: 1 low, 4 moderate, 8 high,
+2 critical**. These are registry classifications, not verified production
+AuthFleet exploitability. The previous registry-unavailable statement is stale.
+After the HTTP fixture upgrade the audit reports **14 vulnerabilities:
+1 low, 3 moderate, 8 high, 2 critical**; the node-server advisory is removed.
+
+| Dependency path                                                                                | Initial advisory result                              | Reachability / disposition                                                                                                                                                                                                           |
+| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `packages/test-ba14 > better-auth@1.4.22`                                                      | 12 advisories: 2 critical, 8 high, 1 moderate, 1 low | Private legacy compatibility cell. Most advisories require OAuth/OIDC/MCP/device/magic-link features absent from its fixture. No production dashboard reachability demonstrated. Retained deliberately for the compatibility matrix. |
+| `apps/api > drizzle-kit > @esbuild-kit/esm-loader > @esbuild-kit/core-utils > esbuild@0.18.20` | Moderate, GHSA-67mh-4wv8-2f99                        | Development-server cross-origin disclosure. No esbuild serving invocation found in application scripts. Upgrade the tooling chain; do not expose its development server.                                                             |
+| `packages/test-e2e > @hono/node-server@1.19.19`                                                | Moderate, GHSA-rmxm-3fg6-px4f                        | `serveStatic` double decoding; fixture does not use that function. Updated to patched 2.1.11 with the HTTP fixture suite included in verification.                                                                                   |
+| `apps/web > shadcn > ts-morph > @ts-morph/common > minimatch@10.2.6`                           | Moderate, GHSA-g3hv-75wg-m249                        | Attacker-controlled glob amplification in development CLI dependency. No demonstrated dashboard request path. Upgrade tooling to minimatch >=11.0.1.                                                                                 |
+
+The two critical Better Auth advisories are GHSA-pw9m-5jxm-xr6h
+(OIDC/MCP refresh-token client authentication) and GHSA-965c-763c-88jm
+(OAuth state usable as magic-link verification). Neither was reported
+against the plugin's current development host, Better Auth 1.7.25.
+
+### Prior finding status and corrections
+
+- F1–F8 remain addressed: verified Access JWT identity, disabled workers.dev,
+  configured allowlist, generic client errors, identifier validation/encoding,
+  project-bound AES-GCM AAD, SELECT enforcement, absent committed dev flags,
+  and no API operator echo.
+- PA1–PA3 remain addressed: manual redirects, validation of effective agent
+  connection updates, and query/fragment rejection. R2-L1 remains addressed.
+- The original “web has zero tests” statement is stale: baseline web had 13
+  tests including 10 real-signature Access JWT tests. Key generation now has
+  additional identity-gate tests; full forwarding integration is still a gap.
+- The prior statement that key generation already used the Access gate was
+  overstated; this round adds that application-level check.
+- Cron logs generic reader messages, not necessarily raw Cloudflare errors.
+  HTTP-route server logs may include diagnostic detail; live log collection
+  remains unverified.
+- Historical file/test counts are snapshots, not current verification totals.
+
+### Residual risks and operator checks
+
+- Better Auth 1.4.22 remains intentionally vulnerable in the private test
+  cell. The published peer range `>=1.4 <2` also permits vulnerable host
+  versions. AuthFleet does not activate the affected host features; document
+  a security-recommended host floor or narrow support in a separate decision.
+- Verify Access-covered hostnames, deployed JWT configuration, CSRF behavior
+  with actual Access cookies, and Workers Logs content on the operator's
+  machine. Unit/build checks do not establish deployed protection.
+- Agent HTTPS destinations are operator-controlled; private destinations
+  are not blocked by application code. The localhost HTTP exception is not
+  runtime-dev-gated. Network restrictions in deployed Workers were not tested.
+- Configure an npm release environment with required approval in repository
+  settings, and consider npm trusted publishing instead of a long-lived
+  bypass-2FA token. No environment was added: it needs operator settings.
+- Release still uses Node 20 although the repository requires Node >=22;
+  aligning the release runtime is recommended separately.
+- No tracked hook framework existed. A local-only `.git/hooks/pre-commit`
+  checks staged whitespace and runs Biome; it is not a team-wide setup.
+
+Typecheck and all 124 tests pass (core 43, web 16, api 28, plugin 23,
+legacy matrix 5, HTTP fixture 9). Lint, all six builds and all three strict
+OpenSpec validations pass. Build warnings concern existing package-export
+condition ordering, chunk size and test-package output declarations.
+
 - **Scope:** initial commit `d97960b` ("AuthFleet v1 foundation")
 - **Date:** 2026-11-15
 - **Method:** static code audit of `apps/api`, `apps/web`, `packages/core`,

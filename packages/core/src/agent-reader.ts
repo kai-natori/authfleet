@@ -55,6 +55,37 @@ export interface HttpAgentReaderOptions {
 }
 
 const MAX_DAYS = 90;
+const MAX_BODY_BYTES = 1024 * 1024;
+const REQUEST_TIMEOUT_MS = 10_000;
+
+async function readBody(response: Response, signal: AbortSignal): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal.addEventListener("abort", abort, { once: true });
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) return text + decoder.decode();
+      size += value.byteLength;
+      if (size > MAX_BODY_BYTES) {
+        void reader.cancel().catch(() => {});
+        throw new AgentReadError("malformed", "plugin returned a malformed response");
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+  } finally {
+    signal.removeEventListener("abort", abort);
+    reader.releaseLock();
+  }
+}
 
 /**
  * Base-URL policy for agent projects (design: HTTPS-only, localhost
@@ -133,9 +164,9 @@ function parseStatsBody(body: unknown): UserStats {
       contractVersion: version,
     });
   }
-  if (!Array.isArray(dailySignups)) {
+  if (!Array.isArray(dailySignups) || dailySignups.length > MAX_DAYS) {
     throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: dailySignups is not an array",
+      detail: "stats: dailySignups must be an array of at most 90 buckets",
       contractVersion: version,
     });
   }
@@ -195,10 +226,12 @@ export class HttpAgentReader implements ProjectStatsReader {
   }
 
   private async request(path: string): Promise<unknown> {
+    const signal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
     let response: Response;
     try {
       response = await this.fetchFn(`${this.baseUrl}${path}`, {
         method: "GET",
+        signal,
         headers: { authorization: `Bearer ${this.apiKey}` },
         // Never follow redirects (plugin audit PA1): the operator
         // validated THIS base URL at registration time. A redirect
@@ -232,10 +265,19 @@ export class HttpAgentReader implements ProjectStatsReader {
         detail: `HTTP ${response.status} from ${path}`,
       });
     }
-    return response.json().catch(() => {
+    let text: string;
+    try {
+      text = await readBody(response, signal);
+    } catch (cause) {
+      if (cause instanceof AgentReadError) throw cause;
+      throw new AgentReadError("unreachable", "plugin is unreachable");
+    }
+    try {
+      return JSON.parse(text);
+    } catch {
       throw new AgentReadError("malformed", "plugin returned a malformed response", {
         detail: `${path}: body is not JSON`,
       });
-    });
+    }
   }
 }
