@@ -48,7 +48,7 @@ for `agent` projects by calling the plugin's `GET /authfleet/stats`
 endpoint in the target app (via `HttpAgentReader`, over HTTPS, with
 the project's API key). When the user data has an anonymous flag, the
 system SHALL also report the anonymous (guest) count; when it does
-not, that field SHALL be absent rather than zero. Both reader
+not, that field SHALL be null rather than zero. Both reader
 implementations SHALL satisfy the same `ProjectStatsReader` contract
 in `packages/core`, so statistics, snapshots and the dashboard behave
 identically for both types.
