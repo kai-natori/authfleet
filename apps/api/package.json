@@ -21,7 +21,6 @@
     "db:bundle": "node scripts/bundle-migrations.mjs && biome format --write src/db/migrations.generated.ts",
     "db:generate": "drizzle-kit generate && pnpm db:bundle",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
     "deploy": "wrangler deploy",
     "dev": "wrangler dev --port 8788",
     "test": "vitest run",

@@ -97,6 +97,48 @@ describe("registry migrations", () => {
     );
   });
 
+  it("preserves projects and snapshots when upgrading a populated v1 registry", async () => {
+    await seed(1);
+    await db
+      .prepare(
+        `INSERT INTO projects VALUES
+       ('project', 'Existing app', 'account', 'database', 'ciphertext', 'iv',
+        'hint', 0, '2026-11-20', '2026-11-20')`,
+      )
+      .run();
+    await db
+      .prepare(
+        `INSERT INTO snapshots VALUES
+       ('snapshot', 'project', '2026-11-20', 42, '2026-11-20')`,
+      )
+      .run();
+    const batch = db.batch.bind(db);
+    vi.spyOn(db, "batch").mockImplementationOnce((statements) =>
+      batch([...statements, db.prepare("INSERT INTO missing_table VALUES (1)")]),
+    );
+    await expect(ensureMigrations(db)).rejects.toThrow();
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM snapshots").first()).toEqual({ n: 1 });
+    expect(await db.prepare("SELECT COUNT(*) AS n FROM d1_migrations").first()).toEqual({ n: 1 });
+    expect(
+      await db
+        .prepare("SELECT name FROM sqlite_master WHERE name = '__authfleet_snapshot_backup'")
+        .first(),
+    ).toBeNull();
+    await ensureMigrations(db);
+    expect((await db.prepare("SELECT * FROM snapshots").all()).results).toEqual([
+      {
+        id: "snapshot",
+        project_id: "project",
+        date: "2026-11-20",
+        total_users: 42,
+        created_at: "2026-11-20",
+      },
+    ]);
+    expect(
+      await db.prepare("SELECT type, token_ciphertext, token_iv FROM projects").first(),
+    ).toEqual({ type: "d1", token_ciphertext: "ciphertext", token_iv: "iv" });
+  });
+
   it("retries failures without recording a failed migration", async () => {
     vi.spyOn(db, "batch").mockRejectedValueOnce(new Error("simulated failure"));
     await expect(ensureMigrations(db)).rejects.toThrow("simulated failure");

@@ -15,14 +15,28 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+
+concurrency:
+  group: npm-publish
+  cancel-in-progress: false
 
 jobs:
+  checks:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/checks.yml
+
   publish:
     if: github.ref == 'refs/heads/main'
+    needs: checks
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
@@ -40,6 +54,10 @@ jobs:
 
       - name: Build plugin
         run: pnpm --filter authfleet build
+
+      - name: Inspect package contents
+        working-directory: packages/plugin
+        run: npm publish --dry-run
 
       - name: Publish plugin (authfleet)
         working-directory: packages/plugin

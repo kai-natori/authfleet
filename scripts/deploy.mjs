@@ -14,7 +14,7 @@ import {
 const root = fileURLToPath(new URL("../", import.meta.url));
 const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 
-function run(args, { capture = false, input, allowMissingWorker = false } = {}) {
+function run(args, { capture = false, input, allowMissingWorker } = {}) {
   const result = spawnSync("pnpm", args, {
     cwd: root,
     encoding: "utf8",
@@ -31,7 +31,7 @@ function run(args, { capture = false, input, allowMissingWorker = false } = {}) 
   if (result.status !== 0) {
     if (
       allowMissingWorker &&
-      /Worker "authfleet-web" not found\./.test(`${result.stdout}\n${result.stderr}`)
+      `${result.stdout}\n${result.stderr}`.includes(`Worker "${allowMissingWorker}" not found.`)
     )
       return "[]";
     throw new Error(
@@ -79,22 +79,31 @@ async function ensureSecrets(app, plan) {
 }
 
 async function main() {
+  // biome-ignore lint/suspicious/noUndeclaredEnvVars: Deployment runs directly with Node, outside Turbo.
+  if (!interactive && (!process.env.CLOUDFLARE_API_TOKEN || !process.env.CLOUDFLARE_ACCOUNT_ID)) {
+    throw new Error(
+      "Non-interactive deployment requires CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.",
+    );
+  }
   wrangler("api", ["whoami", "--json"], { capture: true });
-  run(["run", "build"]);
-  run(["--filter", "@authfleet/api", "run", "deploy"]);
   const apiNames = parseSecretNames(
-    wrangler("api", ["secret", "list", "--format", "json"], { capture: true }),
+    wrangler("api", ["secret", "list", "--format", "json"], {
+      capture: true,
+      allowMissingWorker: "authfleet-api",
+    }),
   );
   const webNames = parseSecretNames(
     wrangler("web", ["secret", "list", "--format", "json"], {
       capture: true,
-      allowMissingWorker: true,
+      allowMissingWorker: "authfleet-web",
     }),
   );
   const apiPlan = planSecrets(apiNames, process.env, apiSettings);
   const webPlan = planSecrets(webNames, process.env, webSettings);
   const missing = missingInputsMessage([...apiPlan, ...webPlan]);
   if (!interactive && missing) throw new Error(missing);
+  run(["run", "build"]);
+  run(["--filter", "@authfleet/api", "run", "deploy"]);
   await ensureSecrets("api", apiPlan);
   await ensureSecrets("web", webPlan);
   run(["--filter", "@authfleet/web", "run", "deploy"]);

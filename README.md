@@ -210,8 +210,9 @@ AUTHFLEET_DEV_BYPASS=1 AUTHFLEET_API_URL=http://127.0.0.1:8788 pnpm dev
 the dashboard shows a fixture project ("Demo — Acme") with deterministic
 fake data before you register any real project.
 
-Checks: `pnpm typecheck`, `pnpm test`, `pnpm lint`, `pnpm build`,
-`pnpm spec:validate`.
+Checks: `pnpm check` runs typecheck, unit tests, lint, build and strict spec
+validation. The HTTP end-to-end fixture is excluded from `pnpm test:unit`;
+`pnpm test` includes it and is reserved for operator runtime verification.
 
 ## Deploy
 
@@ -255,6 +256,23 @@ the Access application protects that exact domain with an allow policy for your
 operators only. Its team domain and audience must match the web settings.
 Both Workers keep `workers.dev` disabled; API remains service-binding-only.
 
+### GitHub Actions deployment
+
+The **Deploy to Cloudflare** workflow runs the repository checks before using
+the same deployment script. Configure the `production` GitHub environment:
+
+- Secrets: `CLOUDFLARE_API_TOKEN` (scoped to the intended account's Workers
+  deployment, D1 provisioning and Worker secret operations) and
+  `AUTHFLEET_OPERATOR_EMAILS`.
+- Variables: `CLOUDFLARE_ACCOUNT_ID`, `AUTHFLEET_ACCESS_TEAM_DOMAIN` and
+  `AUTHFLEET_ACCESS_AUD`.
+
+Run it manually from `main` for the initial deployment. After verifying the
+domain and Access policy, set the **repository** variable
+`AUTHFLEET_DEPLOY_ENABLED=true` to deploy automatically on main pushes.
+Deployments are serialized. Missing non-interactive configuration fails before
+deploying a Worker. Existing Worker secrets still take precedence.
+
 ## Updating
 
 Back up the registry and keep its database name and encryption key unchanged, then:
@@ -265,8 +283,7 @@ git pull && pnpm install && pnpm run deploy
 
 This is the same idempotent deployment command: existing secrets are preserved,
 and pending migrations apply automatically on the first API request after deploy
-(or before scheduled snapshots). `pnpm --filter @authfleet/api db:migrate:remote`
-remains an optional manual path, not a prerequisite. Failed migration initialization
+(or before scheduled snapshots). Failed migration initialization
 returns a generic 503 and is retried on the next request; `/health` remains available.
 
 ### Registry migrations
@@ -276,8 +293,16 @@ requests and scheduled snapshots, once per isolate/database. `/health` does
 not initialize the registry. Migration failures return a generic 503 and are
 retried on the next request; details stay in server-side logs. Migration names
 are recorded in Wrangler's `d1_migrations` table, so existing CLI-migrated
-installations are recognized. `pnpm --filter @authfleet/api db:migrate:remote`
-remains an optional manual path, not a deployment prerequisite.
+installations are recognized.
+
+**Use runtime migrations for upgrades.** The runner preserves snapshots when
+applying legacy migration `0001_lazy_cloak.sql`, whose project-table rebuild
+otherwise triggers D1's cascading deletes. Preservation, restoration and history
+are one atomic batch. The old `db:migrate:remote` shortcut has been removed:
+applying that legacy SQL directly with Wrangler does not include this safeguard.
+If it was already applied and snapshots were lost, restore from a registry backup;
+the new runner cannot reconstruct deleted history. The local CLI migration command
+above is for a fresh development database.
 
 After changing the Drizzle schema, run `pnpm --filter @authfleet/api db:generate`.
 This generates SQL and refreshes the static Worker migration bundle. If SQL files
@@ -288,8 +313,9 @@ Do not edit migrations that have already been applied; add a new migration.
 ## Roadmap
 
 - **Agent plugin**: implemented (`packages/plugin`, endpoint contract
-  v1, tested against Better Auth 1.7.16 and 1.7.25) — the remaining step is
-  the round-2 security audit, which gates the first npm publish.
+  v1, tested against Better Auth 1.7.16 and 1.7.25). The pre-publication audit is
+  complete; current findings and outstanding installation checks are recorded
+  in `SECURITY-AUDIT.md`. See `CHANGELOG.md` for release changes.
 - `apps/mcp`: a read-only MCP server over the same core (ask your AI
   "how many users does my app have?") — deferred from v1 by design.
 - Optional write actions per project (ban/delete) behind explicit
@@ -304,6 +330,12 @@ workflow filename `publish.yml`, allowing direct `npm publish`. The workflow use
 Node 24, npm ≥11.5.1 and `id-token: write`; no `NODE_AUTH_TOKEN` or `--provenance`
 is needed (provenance is automatic). Delete the old `NPM_TOKEN` repository secret
 after verifying trusted publishing works.
+
+Before publishing, update `packages/plugin/package.json` to an unused version
+and record changes in `CHANGELOG.md`. The workflow requires successful repository
+checks and a production dependency audit, builds the plugin and inspects its
+package contents before publishing. Release jobs are serialized.
+Version 0.2.0 requires Better Auth 1.7.16 or newer; update older hosts first.
 
 The package must already exist before trust can be configured. For the first-ever
 publish only, a maintainer must bootstrap it with authenticated npm publishing,

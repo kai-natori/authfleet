@@ -14,12 +14,14 @@
   "private": true,
   "scripts": {
     "build": "turbo run build",
+    "check": "pnpm typecheck && pnpm test:unit && pnpm lint && pnpm build && pnpm spec:validate",
     "deploy": "node scripts/deploy.mjs",
     "format": "biome format --write .",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
-    "spec:validate": "openspec validate add-authfleet-v1 --strict && openspec validate add-agent-plugin --strict && openspec validate streamline-setup-deploy --strict && openspec validate harden-security-audit-2 --strict",
+    "spec:validate": "openspec validate add-authfleet-v1 --strict && openspec validate add-agent-plugin --strict && openspec validate streamline-setup-deploy --strict && openspec validate harden-security-audit-2 --strict && openspec validate finish-release-readiness --strict",
     "test": "turbo run test",
+    "test:unit": "turbo run test --filter='!@authfleet/test-e2e'",
     "typecheck": "turbo run typecheck"
   },
   "version": "0.1.0"
