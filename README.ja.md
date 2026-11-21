@@ -293,6 +293,9 @@ SQL を別途追加した場合は `pnpm --filter @authfleet/api db:bundle` を�
 - プロジェクトごとの書き込み操作（BAN／削除）を、明示的な確認を挟んで
   任意で提供 — 需要が出た場合のみ。v1 は設計として読み取り専用です。
 
+実環境の確認は[運用者向けチェックリスト](docs/operator-verification.md)に記録しています。
+今回のリリースでは未実施です。
+
 ## リリース
 
 npm の trusted publishing を使い、`main` 上の GitHub Actions「Publish to npm」を手動実行します。

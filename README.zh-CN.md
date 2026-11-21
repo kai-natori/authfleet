@@ -261,6 +261,9 @@ git pull && pnpm install && pnpm run deploy
 - 每个项目的可选写操作（封禁/删除），带显式确认——仅在出现需求时；
   v1 按设计是只读的。
 
+实际部署的验证事项见[运营者检查清单](docs/operator-verification.md)。
+本次发布未执行这些检查。
+
 ## 发布
 
 npm 包通过 trusted publishing 发布，手动运行 `main` 上的 GitHub Actions “Publish to npm”。

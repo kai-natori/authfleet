@@ -6,7 +6,7 @@
  * `isAnonymous`): the adapter resolves them to the app's physical
  * table and column names, which is what makes the plugin work on any
  * database and under schema customisation (see the research spike in
- * openspec/changes/add-agent-plugin/spike.md, questions 2–4).
+ * openspec/changes/archive/2026-11-21-add-agent-plugin/spike.md, questions 2–4).
  *
  * Counts only: this module reads aggregate counts and, for the daily
  * buckets, the `createdAt` column alone. It never selects user rows,

@@ -56,23 +56,25 @@ size and test-package output declarations. A package dry run contains only
 the plugin's compiled files, manifest, README and license.
 
 The documentation recheck covered all four READMEs (English, Japanese, Chinese
-and the plugin) and their 12 local Markdown links, with no broken local links.
+and the plugin), with no broken local Markdown links.
 README guidance now explicitly describes the non-dev-gated localhost HTTP
 exception and how to retain an encryption-key backup before initial deployment;
 automatically generated Worker secrets cannot be retrieved later.
-`pnpm spec:validate` now uses `--all --strict --no-interactive`, so new changes
-and materialized specs are included without updating a hard-coded list.
-All five changes pass; there are no materialized specs yet. The absent base
-specification produces one archive-order INFO for `add-agent-plugin`, and the
-two operator runtime tasks remain incomplete. This is not a claim that every
-specification scenario has been exercised in production.
+`pnpm spec:validate` validates all active changes and current specs strictly,
+then validates task completion in archived changes. All five implementation
+changes are archived in dependency order, and the three current specs are
+materialized under `openspec/specs/`; the previous archive-order INFO is resolved.
+The two operator runtime checks were explicitly deferred outside this release
+and remain unchecked in [the operator checklist](docs/operator-verification.md).
+Archive records preserve that decision rather than reporting those checks as
+executed. Specification validation does not establish deployed protection.
 
 ### External completion requirements
 
 - Confirm the web's exact custom domain is covered by an operator-only Access
   policy; API must remain service-binding-only. Verify deployed JWT settings,
   actual Access cookies/CSRF behavior, log contents and a real project connection
-  on the operator's machine. The OpenSpec runtime tasks remain unchecked.
+  on the operator's machine. The operator checklist remains unchecked.
 - Cloudflare deployment is outside this release's scope at the operator's request.
   No deployment was performed, and automatic deployment has not been enabled.
 - npm Trusted Publisher is configured for `kai-natori/authfleet`, `publish.yml`.

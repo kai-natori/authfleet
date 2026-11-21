@@ -45,8 +45,12 @@
 - [x] README (architecture, binding security model, Access setup,
   local dev, security model, roadmap)
 - [x] Unit tests / typecheck / lint run and recorded
-- [ ] Runtime verification on the operator's Mac (dev servers, Access
-  policy, real project registration) — by design not done in CI/sandbox
+
+Scope at release closure: the planned operator runtime verification (dev servers,
+Access policy and real project registration) was **not performed**. Deployment
+was excluded by the operator. This task remains unchecked in
+`docs/operator-verification.md`; it is deferred outside this implementation
+change, not marked complete by this archive.
 
 ## 6. Security audit fixes (2026-11-15, `SECURITY-AUDIT.md` F1–F8)
 
