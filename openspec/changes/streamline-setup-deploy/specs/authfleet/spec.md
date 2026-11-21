@@ -48,9 +48,9 @@ continue to reject unlisted operators with 403.
 ### Requirement: Provisioned one-command deployment
 
 The registry binding SHALL omit a fixed database ID so Wrangler can provision or
-reuse its configured name. The root `pnpm run deploy` command SHALL deploy the
-API before building and deploying the web Worker without requiring manual remote
-migration application.
+reuse its configured name. The root `pnpm run deploy` command SHALL build the
+workspace, deploy the API, configure missing secrets, and then deploy the web
+Worker without requiring manual remote migration application.
 
 #### Scenario: First deployment
 

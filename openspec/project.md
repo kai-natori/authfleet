@@ -13,7 +13,7 @@ Cloudflare."
 - pnpm monorepo
 - `apps/api` — Hono on Cloudflare Workers. **No public exposure**: it is
   reachable only through a Cloudflare service binding from `apps/web`.
-- `apps/web` — TanStack Start + shadcn/ui (Radix base, neutral). Sits behind
+- `apps/web` — TanStack Start + shadcn/ui (Base UI, neutral). Sits behind
   Cloudflare Access.
 - `packages/core` — framework-free shared logic (registry, remote D1
   reading, crypto, snapshots, stats).
@@ -57,6 +57,26 @@ snapshots and the dashboard behave identically for both:
 - **Plugin package version**: semver of the `authfleet` npm package.
 - **Better Auth peer range**: `>=1.7.16 <2`, fixture-tested on 1.7.16 and
   1.7.25 (`packages/test-ba-floor` is the minimum-version matrix cell).
+
+## Specification status and validation
+
+Run `pnpm spec:validate` to validate all changes and materialized specifications
+with strict validation. At release 0.2.0 there are five active changes and no
+materialized `openspec/specs/` documents yet. Validation is not evidence that
+every scenario has been exercised against a deployment.
+
+`add-authfleet-v1` and `add-agent-plugin` retain unchecked operator runtime tasks.
+Do not mark those tasks complete or archive them as verified without the recorded
+runtime checks. When ready, archive `add-authfleet-v1` before `add-agent-plugin`:
+the latter modifies the former's `authfleet` requirements. Until then, the
+validator reports an informational message about the absent base specification.
+
+Read the original proposals in order with the later changes. The original
+plugin's `>=1.4 <2` range is historical: `streamline-setup-deploy` supersedes it
+with `>=1.7.16 <2`. Likewise, `finish-release-readiness` removes the remote CLI
+migration shortcut in favor of the runtime runner's data-preservation safeguard.
+The research spike's old version numbers describe the original investigation,
+not the current supported versions.
 
 ## Security invariants
 

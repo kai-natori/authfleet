@@ -55,6 +55,18 @@ established. Existing build warnings concern export condition ordering, bundle
 size and test-package output declarations. A package dry run contains only
 the plugin's compiled files, manifest, README and license.
 
+The documentation recheck covered all four READMEs (English, Japanese, Chinese
+and the plugin) and their 12 local Markdown links, with no broken local links.
+README guidance now explicitly describes the non-dev-gated localhost HTTP
+exception and how to retain an encryption-key backup before initial deployment;
+automatically generated Worker secrets cannot be retrieved later.
+`pnpm spec:validate` now uses `--all --strict --no-interactive`, so new changes
+and materialized specs are included without updating a hard-coded list.
+All five changes pass; there are no materialized specs yet. The absent base
+specification produces one archive-order INFO for `add-agent-plugin`, and the
+two operator runtime tasks remain incomplete. This is not a claim that every
+specification scenario has been exercised in production.
+
 ### External completion requirements
 
 - Confirm the web's exact custom domain is covered by an operator-only Access

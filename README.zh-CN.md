@@ -146,8 +146,9 @@ export const auth = betterAuth({
   （不只是靠约定）强制只允许单条 `SELECT` 语句，因此它即使出问题也
   不可能改动目标项目。`agent` 插件按设计只读、只返回计数；目标应用
   只持有密钥的 SHA-256 哈希，插件以常数时间比较。
-- **agent 基础 URL 只允许 HTTPS**（仅本地开发的 localhost 例外允许
-  HTTP）；注册时会在保存前验证插件；插件缺失、不可达或契约版本不
+- **agent 基础 URL 要求 HTTPS，localhost 可例外使用 HTTP。**
+  此例外用于本地开发，但代码不会按运行环境限制它；生产连接请使用 HTTPS。
+  注册时会在保存前验证插件；插件缺失、不可达或契约版本不
   支持的项目会以各自独立的状态展示——绝不会显示成“0 用户”。
 - **错误不泄露上游细节。** 目标读取失败时，api 返回给仪表盘的只是
   通用错误；Cloudflare 的错误码和消息只留在服务器端日志里。
@@ -208,6 +209,10 @@ pnpm run deploy
 Wrangler 自动创建或复用 `authfleet-registry` D1，数据库迁移在运行时自动执行。
 已有 secrets 不会被覆盖，值也不会打印。只有缺少 `TOKEN_ENCRYPTION_KEY` 时才生成
 32 字节随机密钥并以 base64 保存。请安全备份密钥；丢失或更换会导致已存凭据无法解密。
+自动生成的密钥会直接写入 Worker secret，不会输出，也无法事后从 Cloudflare 取回。
+如需保留恢复副本，请自行生成 32 字节的 base64 密钥，将其保存在密钥管理工具中，并在
+**首次部署前**运行 `pnpm --filter @authfleet/api exec wrangler secret put TOKEN_ENCRYPTION_KEY`
+输入该密钥。部署脚本会保留已有 secret。已有注册表只能恢复原来的密钥，不要换成新密钥。
 
 缺失设置会交互提示；非交互环境中，对应 Worker secret 不存在时必须提供以下环境变量：
 

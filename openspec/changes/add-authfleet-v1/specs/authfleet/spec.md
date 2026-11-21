@@ -46,7 +46,7 @@ the Cloudflare D1 HTTP query API and report total users, signups per day
 derived from `created_at`, and new users in the last 7 and 30 days. When
 the `user` table has an anonymous flag column, the system SHALL also
 report the anonymous (guest) count; when it does not, that field SHALL be
-absent rather than zero.
+null rather than zero.
 
 #### Scenario: Project without anonymous column
 

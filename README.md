@@ -164,8 +164,9 @@ projects, so its own posture matters.
   even by accident. The `agent` plugin is read-only and counts-only by
   design, and the target app holds only a SHA-256 hash of its key,
   which the plugin compares in constant time.
-- **Agent base URLs are HTTPS-only** (plain HTTP is accepted only for
-  localhost in local development), registration verifies the plugin
+- **Agent base URLs require HTTPS, with an HTTP exception for localhost.**
+  The exception is intended for local development but is not gated by the
+  runtime environment; use HTTPS for production connections. Registration verifies the plugin
   before saving, and a project whose plugin is absent, unreachable or
   on an unsupported contract version is shown as that distinct state —
   never as a zero-user project.
@@ -234,6 +235,13 @@ then deploys web. API schema migrations run automatically at runtime.
 It never prints secret values or rotates existing secrets. It generates a
 32-byte base64 `TOKEN_ENCRYPTION_KEY` only when that secret name is absent.
 Back up the key securely; losing or replacing it orphans encrypted credentials.
+The automatically generated key is written directly to the Worker secret and
+is not exported; Cloudflare does not return its value later. To keep a recoverable
+copy, generate a 32-byte base64 key yourself, save it in your secret manager,
+and run `pnpm --filter @authfleet/api exec wrangler secret put TOKEN_ENCRYPTION_KEY`
+to enter it **before the first deployment**. The deployment script preserves
+that existing secret. For an existing registry, only restore its original key;
+do not replace it with a newly generated one.
 
 Missing settings are prompted for interactively. For non-interactive deployment,
 provide these environment variables when the corresponding Worker secret is absent:
