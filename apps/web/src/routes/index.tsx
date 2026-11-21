@@ -10,17 +10,11 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, XAxis, YAxis } from "recharts";
+import { DailySignupsChartCard, TotalUsersChartCard } from "~/components/dashboard-charts";
 
 import { Badge } from "~/components/ui/badge";
 import { Button } from "~/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "~/components/ui/card";
-import {
-  type ChartConfig,
-  ChartContainer,
-  ChartTooltip,
-  ChartTooltipContent,
-} from "~/components/ui/chart";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -75,14 +69,6 @@ function StatCard(props: { title: string; value: string; description?: string; i
   );
 }
 
-const totalUsersChartConfig = {
-  total: { label: "Total users", color: "var(--chart-1)" },
-} satisfies ChartConfig;
-
-const signupsChartConfig = {
-  count: { label: "Signups", color: "var(--chart-2)" },
-} satisfies ChartConfig;
-
 function DashboardPage() {
   const { projects, operator, selectedId, selectedType, stats } = Route.useLoaderData();
   const navigate = useNavigate({ from: Route.fullPath });
@@ -107,18 +93,6 @@ function DashboardPage() {
 
   const selectedProject = projects.find((p) => p.id === selectedId);
   const summary = stats?.ok ? stats.data.summary : undefined;
-  const growth = summary?.growth;
-
-  const snapshotData = summary
-    ? [...summary.snapshots]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map((snap) => ({ date: snap.date, total: snap.totalUsers }))
-    : [];
-  const signupData = summary
-    ? [...summary.stats.dailySignups]
-        .sort((a, b) => a.date.localeCompare(b.date))
-        .map((day) => ({ date: day.date, count: day.count }))
-    : [];
 
   return (
     <div className="space-y-6">
@@ -204,108 +178,8 @@ function DashboardPage() {
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Total users</CardTitle>
-                <CardDescription>
-                  {growth
-                    ? `${growth.firstTotal.toLocaleString()} users on ${growth.firstDate} → ${growth.latestTotal.toLocaleString()} on ${growth.latestDate} (${growth.delta >= 0 ? "+" : ""}${growth.delta.toLocaleString()}${growth.deltaPercent !== null ? `, ${growth.deltaPercent.toFixed(1)}%` : ""} over ${growth.spanDays} days, from daily snapshots)`
-                    : "Not enough snapshots yet — the api Worker records one per day, and growth appears once two exist."}
-                </CardDescription>
-              </CardHeader>
-              {growth ? (
-                <CardContent>
-                  <ChartContainer
-                    config={totalUsersChartConfig}
-                    className="aspect-auto h-[280px] w-full"
-                  >
-                    <AreaChart
-                      accessibilityLayer
-                      data={snapshotData}
-                      margin={{ left: 4, right: 12 }}
-                    >
-                      <CartesianGrid vertical={false} />
-                      <XAxis
-                        dataKey="date"
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        minTickGap={32}
-                        tickFormatter={(value: string) => value.slice(5)}
-                      />
-                      <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        width={52}
-                        tickFormatter={(value: number) => value.toLocaleString()}
-                      />
-                      <ChartTooltip
-                        cursor={false}
-                        content={<ChartTooltipContent indicator="line" />}
-                      />
-                      <defs>
-                        <linearGradient id="fillTotalUsers" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--color-total)" stopOpacity={0.8} />
-                          <stop offset="95%" stopColor="var(--color-total)" stopOpacity={0.1} />
-                        </linearGradient>
-                      </defs>
-                      <Area
-                        dataKey="total"
-                        type="natural"
-                        fill="url(#fillTotalUsers)"
-                        stroke="var(--color-total)"
-                        strokeWidth={2}
-                        isAnimationActive={false}
-                      />
-                    </AreaChart>
-                  </ChartContainer>
-                </CardContent>
-              ) : null}
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Signups per day</CardTitle>
-                <CardDescription>Last 30 days</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {signupData.length > 0 ? (
-                  <ChartContainer
-                    config={signupsChartConfig}
-                    className="aspect-auto h-[280px] w-full"
-                  >
-                    <BarChart accessibilityLayer data={signupData} margin={{ left: 4, right: 12 }}>
-                      <CartesianGrid vertical={false} />
-                      <XAxis
-                        dataKey="date"
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        minTickGap={24}
-                        tickFormatter={(value: string) => value.slice(5)}
-                      />
-                      <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        width={36}
-                        allowDecimals={false}
-                      />
-                      <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
-                      <Bar
-                        dataKey="count"
-                        fill="var(--color-count)"
-                        radius={[4, 4, 0, 0]}
-                        isAnimationActive={false}
-                      />
-                    </BarChart>
-                  </ChartContainer>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No signup data available.</p>
-                )}
-              </CardContent>
-            </Card>
+            <TotalUsersChartCard summary={summary} />
+            <DailySignupsChartCard summary={summary} />
           </div>
 
           <p className="text-xs text-muted-foreground">

@@ -40,6 +40,15 @@ export interface ProjectStatsResponse {
   summary: ProjectStatsSummary;
 }
 
+export class ApiError extends Error {
+  readonly pluginStatus: PluginStatus | null;
+
+  constructor(message: string, pluginStatus: unknown) {
+    super(message);
+    this.pluginStatus = isPluginStatus(pluginStatus) ? pluginStatus : null;
+  }
+}
+
 /** The Worker env object published per-request by worker.mjs. */
 function workerEnv(): Record<string, unknown> | undefined {
   return globalThis.__AUTHFLEET_ENV__ as Record<string, unknown> | undefined;
@@ -107,14 +116,10 @@ export const callApi = createServerOnlyFn(
       | { error?: string; pluginStatus?: unknown }
       | null;
     if (!response.ok) {
-      const error = new Error(body?.error ?? `AuthFleet api error: HTTP ${response.status}`);
-      // Agent-project stats failures carry the plugin status kind so
-      // callers can render first-class plugin states (see
-      // ../lib/plugin-status). Anything unrecognized is dropped.
-      if (isPluginStatus(body?.pluginStatus)) {
-        (error as Error & { pluginStatus?: PluginStatus }).pluginStatus = body.pluginStatus;
-      }
-      throw error;
+      throw new ApiError(
+        body?.error ?? `AuthFleet api error: HTTP ${response.status}`,
+        body?.pluginStatus,
+      );
     }
     return body as T;
   },
@@ -153,10 +158,9 @@ export const getProjectStatsFn = createServerFn({ method: "GET" })
       );
       return { ok: true, data: response };
     } catch (cause) {
-      const pluginStatus = (cause as { pluginStatus?: unknown })?.pluginStatus;
       return {
         ok: false,
-        pluginStatus: isPluginStatus(pluginStatus) ? pluginStatus : null,
+        pluginStatus: cause instanceof ApiError ? cause.pluginStatus : null,
         error: cause instanceof Error ? cause.message : "failed to read project stats",
       };
     }

@@ -323,4 +323,24 @@ describe("HttpAgentReader — typed errors (F3 discipline)", () => {
       .catch((e: unknown) => e)) as AgentReadError;
     expect(err3.kind).toBe("malformed");
   });
+
+  it.each([
+    { totalUsers: -1 },
+    { anonymousUsers: -1 },
+    { dailySignups: null },
+    { dailySignups: [{ date: "2026-11-15", count: -1 }] },
+    { asOf: "not a timestamp" },
+  ])("preserves malformed field errors for %j", async (patch) => {
+    const stub = stubFetch(() => jsonResponse({ ...STATS_BODY, ...patch }));
+    await expect(reader(stub.fetchFn).getUserStats()).rejects.toMatchObject({
+      kind: "malformed",
+      message: "plugin returned a malformed response",
+      contractVersion: 1,
+    });
+  });
+
+  it("accepts empty signup buckets", async () => {
+    const stub = stubFetch(() => jsonResponse({ ...STATS_BODY, dailySignups: [] }));
+    expect((await reader(stub.fetchFn).getUserStats()).dailySignups).toEqual([]);
+  });
 });

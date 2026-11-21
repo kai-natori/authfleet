@@ -144,31 +144,30 @@ function parseContractVersion(body: unknown, endpoint: string): number {
   return version;
 }
 
+function malformedStats(detail: string, contractVersion?: number): AgentReadError {
+  return new AgentReadError("malformed", "plugin returned a malformed response", {
+    detail,
+    ...(contractVersion === undefined ? {} : { contractVersion }),
+  });
+}
+
 function parseStatsBody(body: unknown): UserStats {
   const version = parseContractVersion(body, "stats");
   if (!isRecord(body)) {
-    throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: body is not an object",
-    });
+    throw malformedStats("stats: body is not an object");
   }
   const { totalUsers, anonymousUsers, dailySignups, asOf } = body;
   if (typeof totalUsers !== "number" || !Number.isInteger(totalUsers) || totalUsers < 0) {
-    throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: totalUsers is not a non-negative integer",
-      contractVersion: version,
-    });
+    throw malformedStats("stats: totalUsers is not a non-negative integer", version);
   }
   if (anonymousUsers !== null && (typeof anonymousUsers !== "number" || anonymousUsers < 0)) {
-    throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: anonymousUsers is neither null nor a non-negative number",
-      contractVersion: version,
-    });
+    throw malformedStats(
+      "stats: anonymousUsers is neither null nor a non-negative number",
+      version,
+    );
   }
   if (!Array.isArray(dailySignups) || dailySignups.length > MAX_DAYS + 1) {
-    throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: dailySignups must be an array of at most 91 buckets",
-      contractVersion: version,
-    });
+    throw malformedStats("stats: dailySignups must be an array of at most 91 buckets", version);
   }
   const signups: DailySignup[] = [];
   for (const entry of dailySignups) {
@@ -179,18 +178,12 @@ function parseStatsBody(body: unknown): UserStats {
       typeof entry.count !== "number" ||
       entry.count < 0
     ) {
-      throw new AgentReadError("malformed", "plugin returned a malformed response", {
-        detail: "stats: dailySignups entry has an invalid shape",
-        contractVersion: version,
-      });
+      throw malformedStats("stats: dailySignups entry has an invalid shape", version);
     }
     signups.push({ date: entry.date, count: entry.count });
   }
   if (typeof asOf !== "string" || Number.isNaN(Date.parse(asOf))) {
-    throw new AgentReadError("malformed", "plugin returned a malformed response", {
-      detail: "stats: asOf is not a parseable timestamp",
-      contractVersion: version,
-    });
+    throw malformedStats("stats: asOf is not a parseable timestamp", version);
   }
   return { totalUsers, anonymousUsers, dailySignups: signups, asOf };
 }
